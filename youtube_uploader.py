@@ -2,7 +2,6 @@
 import os
 import time
 import datetime
-import subprocess
 import logging
 import shutil
 import sys
@@ -18,8 +17,8 @@ from googleapiclient.http import MediaFileUpload
 # ---------- CONFIG ----------
 WATCH_FOLDER = r"C:\Path\To\WarcraftRecorder"
 DRIVE_SYNC_FOLDER = r"C:\Users\You\GoogleDrive\RaidVideos"  # Optional, leave empty if unused
-COMPRESS = True   # Use ffmpeg to shrink file size
 YOUTUBE_PLAYLIST_ID = None  # Set to a playlist ID if you want automatic sorting
+SEASON_START_DATE = "2024-09-01"  # Season start date for raid week calculation (YYYY-MM-DD)
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
 # Setup logging
@@ -47,43 +46,108 @@ def authenticate_youtube():
             token.write(creds.to_json())
     return build("youtube", "v3", credentials=creds)
 
-def make_nice_name(file_path):
-    """Generate a nice filename with timestamp.
-
-    Template: Boss_PullCount_YYYY-MM-DD_HH-MM.mp4
+def extract_context_from_filename(filename):
+    """Extract context information from Warcraft Recorder filename.
+    
+    Expected format: YYYY-MM-DD HH-MM-SS - Marpally - [Context]...
+    Returns: (date, time, context)
     """
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
-    base = os.path.basename(file_path)
-    _, ext = os.path.splitext(base)
-    # Placeholder: replace with actual boss/pull logic if available
-    return f"Raid_{timestamp}{ext}"
-
-def compress_with_ffmpeg(input_path, output_path):
-    """Compress video using FFmpeg with optimized settings for gaming content."""
-    logging.info("Compressing %s...", input_path)
     try:
-        # Better compression settings for gaming content
-        cmd = [
-            "ffmpeg", "-y", "-i", input_path,
-            "-c:v", "libx264",           # Video codec
-            "-crf", "23",                # Better quality (lower = better quality)
-            "-preset", "medium",         # Balance between speed and compression
-            "-c:a", "aac",               # Audio codec
-            "-b:a", "128k",              # Audio bitrate
-            "-movflags", "+faststart",   # Optimize for web streaming
-            "-vf", "scale=1920:1080",    # Scale to 1080p if needed
-            output_path
-        ]
+        # Remove file extension
+        name = os.path.splitext(filename)[0]
+        
+        # Split by " - " to get parts
+        parts = name.split(" - ")
+        if len(parts) >= 3:
+            timestamp_part = parts[0]  # "2025-09-03 22-16-58"
+            player_part = parts[1]     # "Marpally"
+            context_part = parts[2]    # "Fo..." or "Th..." etc.
+            
+            # Parse timestamp
+            date_time = datetime.datetime.strptime(timestamp_part, "%Y-%m-%d %H-%M-%S")
+            
+            # Extract context (remove "..." if present)
+            context = context_part.replace("...", "").strip()
+            
+            return date_time, context
+    except Exception as e:
+        logging.warning(f"Could not parse filename {filename}: {e}")
+    
+    # Fallback to current time and generic context
+    return datetime.datetime.now(), "Unknown"
 
-        subprocess.run(cmd, capture_output=True, text=True, check=True)
-        logging.info("Compression completed successfully: %s", output_path)
-        return output_path
-    except subprocess.CalledProcessError as e:
-        logging.error("FFmpeg compression failed: %s", e.stderr)
-        raise
-    except FileNotFoundError:
-        logging.error("FFmpeg not found. Please install FFmpeg and ensure it's in your PATH.")
-        raise
+def get_raid_week(start_date=None):
+    """Calculate raid week number from season start date.
+    
+    Args:
+        start_date: Season start date (defaults to SEASON_START_DATE config)
+    Returns:
+        Week number (W1, W2, etc.)
+    """
+    if start_date is None:
+        # Use the configured season start date
+        try:
+            start_date = datetime.datetime.strptime(SEASON_START_DATE, "%Y-%m-%d").date()
+        except ValueError:
+            # Fallback to default if config is invalid
+            start_date = datetime.date(2024, 9, 1)
+    
+    today = datetime.date.today()
+    days_diff = (today - start_date).days
+    week_num = max(1, (days_diff // 7) + 1)  # Ensure at least week 1
+    return f"W{week_num}"
+
+def get_boss_pull_count(boss_name, date, pull_tracker):
+    """Get the pull count for a specific boss on a specific date.
+    
+    Args:
+        boss_name: Name of the boss/encounter
+        date: Date of the encounter
+        pull_tracker: Dictionary to track pull counts
+        
+    Returns:
+        Pull number for this boss on this date
+    """
+    date_key = date.strftime("%Y-%m-%d")
+    boss_key = f"{date_key}_{boss_name}"
+    
+    if boss_key not in pull_tracker:
+        pull_tracker[boss_key] = 0
+    
+    pull_tracker[boss_key] += 1
+    return pull_tracker[boss_key]
+
+def make_nice_name(file_path, pull_tracker=None):
+    """Generate a context-aware filename with raid week, boss, and pull tracking.
+    
+    Format: RaidWeek_BossName_Pull#_Date_Time.mp4
+    Example: W1_Fo_Pull1_Sep03_10-16PM.mp4
+    """
+    if pull_tracker is None:
+        pull_tracker = {}
+    
+    filename = os.path.basename(file_path)
+    _, ext = os.path.splitext(filename)
+    
+    # Extract context from Warcraft Recorder filename
+    record_time, context = extract_context_from_filename(filename)
+    
+    # Get raid week
+    raid_week = get_raid_week()
+    
+    # Get pull count for this boss on this date
+    pull_count = get_boss_pull_count(context, record_time.date(), pull_tracker)
+    
+    # Format date and time
+    date_str = record_time.strftime("%b%d")  # Sep03, Oct15, etc.
+    time_str = record_time.strftime("%I-%M%p")  # 10-16PM, 2-30AM, etc.
+    
+    # Create the new filename
+    new_name = f"{raid_week}_{context}_Pull{pull_count}_{date_str}_{time_str}{ext}"
+    
+    logging.info(f"Renamed: {filename} -> {new_name}")
+    return new_name
+
 
 def upload_to_youtube(youtube_service, file_path, title, description="Raid Upload",
                      playlist_id=None):
@@ -169,6 +233,7 @@ class VideoHandler(FileSystemEventHandler):
         """Initialize the video handler with YouTube service."""
         self.youtube = youtube_service
         self.processing_files = set()  # Track files being processed
+        self.pull_tracker = {}  # Track pull counts per boss per day
 
     def on_created(self, event):
         """Handle file creation events."""
@@ -190,6 +255,46 @@ class VideoHandler(FileSystemEventHandler):
         finally:
             self.processing_files.discard(event.src_path)
 
+    def _create_youtube_title(self, filename):
+        """Create a descriptive YouTube title from the filename.
+        
+        Format: WoW Raid - [Raid Week] [Boss Name] Pull #X - [Date] [Time]
+        Example: WoW Raid - W1 Fo Pull #1 - Sep 03 10:16 PM
+        """
+        try:
+            # Remove file extension
+            name = os.path.splitext(filename)[0]
+            
+            # Split by underscores to get parts
+            parts = name.split('_')
+            if len(parts) >= 5:
+                raid_week = parts[0]  # W1
+                boss_name = parts[1]  # Fo
+                pull_info = parts[2]  # Pull1
+                date_str = parts[3]   # Sep03
+                time_str = parts[4]   # 10-16PM
+                
+                # Format time for better readability
+                time_formatted = time_str.replace('-', ':').replace('PM', ' PM').replace('AM', ' AM')
+                
+                # Format date for better readability
+                date_formatted = date_str.replace('Sep', 'September').replace('Oct', 'October').replace('Nov', 'November').replace('Dec', 'December')
+                date_formatted = date_formatted.replace('Jan', 'January').replace('Feb', 'February').replace('Mar', 'March').replace('Apr', 'April')
+                date_formatted = date_formatted.replace('May', 'May').replace('Jun', 'June').replace('Jul', 'July').replace('Aug', 'August')
+                
+                # Add day number
+                if len(date_formatted) > 3:
+                    day_num = date_formatted[3:]
+                    month_name = date_formatted[:3]
+                    date_formatted = f"{month_name} {day_num}"
+                
+                return f"WoW Raid - {raid_week} {boss_name} {pull_info} - {date_formatted} {time_formatted}"
+        except Exception as e:
+            logging.warning(f"Could not create YouTube title from {filename}: {e}")
+        
+        # Fallback to original filename
+        return filename
+
     def _process_video(self, file_path):
         """Process a single video file with proper error handling."""
         logging.info("New file detected: %s", file_path)
@@ -204,7 +309,7 @@ class VideoHandler(FileSystemEventHandler):
             logging.info("File still being written, waiting...")
             time.sleep(5)
 
-        new_name = make_nice_name(file_path)
+        new_name = make_nice_name(file_path, self.pull_tracker)
         temp_path = os.path.join(WATCH_FOLDER, new_name)
 
         # Create backup of original file
@@ -212,20 +317,18 @@ class VideoHandler(FileSystemEventHandler):
         shutil.copy2(file_path, backup_path)
 
         try:
-            # Compress if enabled
-            final_path = temp_path
-            if COMPRESS:
-                final_path = temp_path.replace(".mp4", "_compressed.mp4")
-                compress_with_ffmpeg(file_path, final_path)
-            else:
-                shutil.move(file_path, final_path)
+            # Move file to final location
+            shutil.move(file_path, temp_path)
 
+            # Create a more descriptive YouTube title
+            youtube_title = self._create_youtube_title(new_name)
+            
             # Upload to YouTube
-            upload_to_youtube(self.youtube, final_path, title=new_name,
+            upload_to_youtube(self.youtube, temp_path, title=youtube_title,
                              playlist_id=YOUTUBE_PLAYLIST_ID)
 
             # Copy to Drive folder (optional)
-            move_to_drive(final_path, DRIVE_SYNC_FOLDER)
+            move_to_drive(temp_path, DRIVE_SYNC_FOLDER)
 
             # Clean up backup if everything succeeded
             if os.path.exists(backup_path):
