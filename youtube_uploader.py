@@ -1,4 +1,4 @@
-python script to upload videos to youtube from a folder
+# Python script to upload videos to YouTube from a folder
 import os
 import time
 import datetime
