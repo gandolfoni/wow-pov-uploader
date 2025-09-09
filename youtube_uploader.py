@@ -10,8 +10,8 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
@@ -49,7 +49,7 @@ def authenticate_youtube():
 
 def make_nice_name(file_path):
     """Generate a nice filename with timestamp.
-    
+
     Template: Boss_PullCount_YYYY-MM-DD_HH-MM.mp4
     """
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
@@ -85,7 +85,8 @@ def compress_with_ffmpeg(input_path, output_path):
         logging.error("FFmpeg not found. Please install FFmpeg and ensure it's in your PATH.")
         raise
 
-def upload_to_youtube(youtube_service, file_path, title, description="Raid Upload", playlist_id=None):
+def upload_to_youtube(youtube_service, file_path, title, description="Raid Upload",
+                     playlist_id=None):
     """Upload video to YouTube with error handling and progress tracking."""
     try:
         logging.info("Starting upload: %s", title)
@@ -163,7 +164,7 @@ def move_to_drive(file_path, dest_folder):
 
 class VideoHandler(FileSystemEventHandler):
     """File system event handler for video file monitoring."""
-    
+
     def __init__(self, youtube_service):
         """Initialize the video handler with YouTube service."""
         self.youtube = youtube_service
@@ -220,7 +221,8 @@ class VideoHandler(FileSystemEventHandler):
                 shutil.move(file_path, final_path)
 
             # Upload to YouTube
-            upload_to_youtube(self.youtube, final_path, title=new_name, playlist_id=YOUTUBE_PLAYLIST_ID)
+            upload_to_youtube(self.youtube, final_path, title=new_name,
+                             playlist_id=YOUTUBE_PLAYLIST_ID)
 
             # Copy to Drive folder (optional)
             move_to_drive(final_path, DRIVE_SYNC_FOLDER)
@@ -244,22 +246,23 @@ if __name__ == "__main__":
             sys.exit(1)
 
         if not os.path.exists("credentials.json"):
-            logging.error("credentials.json not found. Please download it from Google Cloud Console.")
+            logging.error("credentials.json not found. Please download it from "
+                         "Google Cloud Console.")
             sys.exit(1)
-        
+
         logging.info("Starting YouTube Uploader...")
         youtube = authenticate_youtube()
         event_handler = VideoHandler(youtube)
         observer = Observer()
         observer.schedule(event_handler, WATCH_FOLDER, recursive=False)
         observer.start()
-        
+
         logging.info("Watching %s for new videos...", WATCH_FOLDER)
         logging.info("Press Ctrl+C to stop")
 
         while True:
             time.sleep(10)
-            
+
     except KeyboardInterrupt:
         logging.info("Shutting down...")
         observer.stop()
