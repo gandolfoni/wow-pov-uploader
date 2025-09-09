@@ -5,12 +5,13 @@ An automated YouTube uploader for World of Warcraft POV (Point of View) videos. 
 // Trying to vibecode a way to automatically upload my raid POVs captured using Warcraft Recorder to YouTube + any other easily accessible platform. The goal is to have the video files Wacraft Recorder saves locally be automatically/periodically uploaded, compressed, orgranized into easily navigable playlists.
 
 // to do:
-- [ ] create github repo for project [gh repo create wow-pov-uploader --public --source=. --remote=origin --push]
+- [x] create github repo for project [gh repo create wow-pov-uploader --public --source=. --remote=origin --push]
 - [ ] add ability to sync with Google Drive folder
 - [ ] add a way to compress the videos (using ffmpeg, detailed by ai later on in this doc)
 - [ ] integrate with Google Console API, install dependencies, set up credentials.json
 - [ ] clean up remaining ai slop in repo after review - want to be simple & functional, try to improve/interate over time. 
 - [ ] add a way to organize the videos into playlists, improve naming conventions, clean up in general
+
 
 ## Features
 
