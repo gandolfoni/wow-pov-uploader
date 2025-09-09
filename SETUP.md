@@ -154,9 +154,9 @@ To modify, edit the `compress_with_ffmpeg()` function.
 ## Next Steps
 
 Once everything is working:
-1. Set up your WoW recording software to save to the watch folder
+1. Set up your WoW recording software to save to the watch folder (I am using Warcraft Recorder, find more detials about file paths to the watch folder in their docs)
 2. Configure automatic recording triggers
 3. Set up YouTube playlists for organization
 4. Consider setting up Google Drive sync for backups
 
-Happy uploading! 🎮📹
+Keep yer feet on the ground! 
