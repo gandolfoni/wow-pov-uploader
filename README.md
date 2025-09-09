@@ -2,6 +2,8 @@
 
 An automated YouTube uploader for World of Warcraft POV (Point of View) videos. This script monitors a folder for new video files and automatically uploads them to YouTube with compression and proper naming conventions.
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/gandolfoni/wow-pov-uploader)
+
 // Trying to vibecode a way to automatically upload my raid POVs captured using Warcraft Recorder to YouTube + any other easily accessible platform. The goal is to have the video files Wacraft Recorder saves locally be automatically/periodically uploaded, compressed, orgranized into easily navigable playlists.
 
 // to do:
@@ -22,6 +24,18 @@ An automated YouTube uploader for World of Warcraft POV (Point of View) videos. 
 - 🎵 **Playlist Support**: Automatically adds videos to specified YouTube playlists
 - 📊 **Progress Tracking**: Real-time upload progress and comprehensive logging
 - 🔒 **Secure**: Uses OAuth2 for YouTube API authentication
+
+## 🚀 Quick Start
+
+**One-click deployment with GitHub Codespaces:**
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/gandolfoni/wow-pov-uploader)
+
+1. Click the "Open in GitHub Codespaces" button above
+2. Wait 2-3 minutes for the environment to set up
+3. Upload your `credentials.json` file
+4. Configure your watch folder path
+5. Run `python youtube_uploader.py`
 
 ## Prerequisites
 
