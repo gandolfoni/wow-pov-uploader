@@ -581,8 +581,11 @@ def move_to_drive(file_path, dest_folder):
         return
     os.makedirs(dest_folder, exist_ok=True)
     new_path = os.path.join(dest_folder, os.path.basename(file_path))
-    os.rename(file_path, new_path)
-    logging.info("Copied to Drive sync folder: %s", new_path)
+    shutil.move(file_path, new_path)
+    logging.info("Moved to Drive sync folder: %s", new_path)
+
+class PendingUploadQueued(Exception):
+    """Raised when an upload is queued for later retry."""
 
 def load_pending_uploads(path):
     if not os.path.exists(path):
@@ -616,6 +619,9 @@ def process_pending_uploads(youtube_service):
         file_path = item.get("file_path")
         title = item.get("title")
         upload_options = item.get("upload_options")
+        original_path = item.get("original_path")
+        cleanup_path = item.get("cleanup_path")
+        drive_sync_folder = item.get("drive_sync_folder")
         if not file_path or not title or not upload_options:
             logging.warning("Skipping invalid pending upload entry: %s", item)
             continue
@@ -629,6 +635,13 @@ def process_pending_uploads(youtube_service):
                 remaining.append(item)
                 continue
             upload_to_youtube(youtube_service, file_path, title, upload_options)
+            if cleanup_path and os.path.exists(cleanup_path):
+                os.remove(cleanup_path)
+            if drive_sync_folder:
+                if original_path and os.path.exists(original_path):
+                    move_to_drive(original_path, drive_sync_folder)
+                elif os.path.exists(file_path) and file_path != cleanup_path:
+                    move_to_drive(file_path, drive_sync_folder)
         except (HttpError, OSError, ValueError) as exc:
             logging.error("Pending upload failed, keeping in queue: %s", exc)
             remaining.append(item)
@@ -789,6 +802,9 @@ class VideoHandler(FileSystemEventHandler):
                     pending = load_pending_uploads(PENDING_UPLOADS_PATH)
                     pending.append({
                         "file_path": upload_path,
+                        "original_path": temp_path,
+                        "cleanup_path": upload_path if compressed else None,
+                        "drive_sync_folder": DRIVE_SYNC_FOLDER,
                         "title": youtube_title,
                         "upload_options": {
                             "description": DEFAULT_DESCRIPTION,
@@ -798,7 +814,7 @@ class VideoHandler(FileSystemEventHandler):
                         },
                     })
                     save_pending_uploads(PENDING_UPLOADS_PATH, pending)
-                    raise
+                    raise PendingUploadQueued(str(exc))
                 finally:
                     if compressed and upload_succeeded and os.path.exists(upload_path):
                         os.remove(upload_path)
@@ -810,6 +826,11 @@ class VideoHandler(FileSystemEventHandler):
             if os.path.exists(backup_path):
                 os.remove(backup_path)
 
+        except PendingUploadQueued as exc:
+            logging.error("Processing failed after queuing pending upload: %s", exc)
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+            raise
         except (OSError, HttpError, ValueError) as exc:
             logging.error("Processing failed, restoring backup: %s", exc)
             # Restore original file if something went wrong
