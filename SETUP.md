@@ -64,8 +64,14 @@ ffmpeg -version
    ```python
    WATCH_FOLDER = r"C:\Path\To\Your\WarcraftRecorder"  # Change this path
    DRIVE_SYNC_FOLDER = r"C:\Users\YourName\GoogleDrive\RaidVideos"  # Optional
-   COMPRESS = True   # Keep True for smaller file sizes
+   YOUTUBE_PRIVACY = "unlisted"  # unlisted, private, public
+   DEFAULT_DESCRIPTION = "Raid Upload"
+   DEFAULT_TAGS = ["World of Warcraft", "WoW", "Raid", "POV"]
+   DRY_RUN = False  # Skip uploads for testing
    YOUTUBE_PLAYLIST_ID = None  # Add playlist ID if you want auto-sorting
+   STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
+   STABLE_WRITE_INTERVAL_SECONDS = 2
+   PULL_TRACKER_PATH = "pull_tracker.json"
    ```
 
 3. **Create Watch Folder**

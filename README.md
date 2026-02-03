@@ -80,8 +80,14 @@ Edit the configuration section in `youtube_uploader.py`:
 # ---------- CONFIG ----------
 WATCH_FOLDER = r"C:\Path\To\WarcraftRecorder"  # Folder to monitor for videos
 DRIVE_SYNC_FOLDER = r"C:\Users\You\GoogleDrive\RaidVideos"  # Optional Google Drive sync
-COMPRESS = True   # Enable video compression
+YOUTUBE_PRIVACY = "unlisted"  # unlisted, private, public
+DEFAULT_DESCRIPTION = "Raid Upload"
+DEFAULT_TAGS = ["World of Warcraft", "WoW", "Raid", "POV"]
+DRY_RUN = False  # Skip uploads for testing
 YOUTUBE_PLAYLIST_ID = None  # Set to playlist ID for automatic sorting
+STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
+STABLE_WRITE_INTERVAL_SECONDS = 2
+PULL_TRACKER_PATH = "pull_tracker.json"
 ```
 
 ### 3. First Run
@@ -117,8 +123,14 @@ python youtube_uploader.py
 |--------|-------------|---------|
 | `WATCH_FOLDER` | Folder to monitor for new videos | Required |
 | `DRIVE_SYNC_FOLDER` | Google Drive folder for sync (optional) | None |
-| `COMPRESS` | Enable FFmpeg compression | True |
 | `YOUTUBE_PLAYLIST_ID` | YouTube playlist ID for auto-sorting | None |
+| `YOUTUBE_PRIVACY` | Upload privacy setting | `unlisted` |
+| `DEFAULT_DESCRIPTION` | Default YouTube description | `Raid Upload` |
+| `DEFAULT_TAGS` | Default YouTube tags | `["World of Warcraft", "WoW", "Raid", "POV"]` |
+| `DRY_RUN` | Skip uploads and Drive sync for testing | `False` |
+| `STABLE_WRITE_CHECKS` | File stability checks before processing | `3` |
+| `STABLE_WRITE_INTERVAL_SECONDS` | Seconds between stability checks | `2` |
+| `PULL_TRACKER_PATH` | Persisted pull counter file path | `pull_tracker.json` |
 
 ## Video Compression
 
