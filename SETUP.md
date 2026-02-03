@@ -71,6 +71,10 @@ python --version
    ```bash
    python youtube_uploader.py --watch-folder "C:\Path\To\Your\WarcraftRecorder" --dry-run
    ```
+   - Process existing files and exit:
+   ```bash
+   python youtube_uploader.py --once
+   ```
 
 3. **Create Watch Folder**
    - Create the folder you specified in `WATCH_FOLDER`

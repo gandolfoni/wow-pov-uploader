@@ -11,6 +11,7 @@
   "ignore_patterns": ["*.tmp", "*.part", "*.partial", "*.crdownload", "*.download"],
   "ignore_extensions": [".tmp", ".part", ".crdownload"],
   "pull_tracker_path": "pull_tracker.json",
+  "uploaded_titles_path": "uploaded_titles.json",
   "compression_enabled": false,
   "compression_preset": "medium",
   "compression_crf": 23,

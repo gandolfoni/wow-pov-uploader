@@ -58,6 +58,7 @@ CONFIG_DEFAULTS = {
     "log_file": "youtube_uploader.log",
     "log_max_bytes": 5_000_000,
     "log_backup_count": 3,
+    "uploaded_titles_path": "uploaded_titles.json",
 }
 
 WATCH_FOLDER = CONFIG_DEFAULTS["watch_folder"]
@@ -89,6 +90,7 @@ PENDING_UPLOADS_PATH = CONFIG_DEFAULTS["pending_uploads_path"]
 LOG_FILE = CONFIG_DEFAULTS["log_file"]
 LOG_MAX_BYTES = CONFIG_DEFAULTS["log_max_bytes"]
 LOG_BACKUP_COUNT = CONFIG_DEFAULTS["log_backup_count"]
+UPLOADED_TITLES_PATH = CONFIG_DEFAULTS["uploaded_titles_path"]
 
 # Setup logging
 def configure_logging():
@@ -165,6 +167,8 @@ def parse_args():
     parser.add_argument("--log-file", help="Log file path")
     parser.add_argument("--log-max-bytes", type=int, help="Max log size in bytes before rotation")
     parser.add_argument("--log-backup-count", type=int, help="Number of rotated log files to keep")
+    parser.add_argument("--uploaded-titles-path", help="Path to uploaded titles cache JSON")
+    parser.add_argument("--once", action="store_true", help="Process existing files and exit")
     return parser.parse_args()
 
 def _validate_positive_int(value, name):
@@ -244,6 +248,7 @@ def apply_config(config, args):
     global LOG_FILE
     global LOG_MAX_BYTES
     global LOG_BACKUP_COUNT
+    global UPLOADED_TITLES_PATH
 
     if args.watch_folder:
         config["watch_folder"] = args.watch_folder
@@ -297,6 +302,8 @@ def apply_config(config, args):
         config["log_max_bytes"] = args.log_max_bytes
     if args.log_backup_count is not None:
         config["log_backup_count"] = args.log_backup_count
+    if args.uploaded_titles_path is not None:
+        config["uploaded_titles_path"] = args.uploaded_titles_path
 
     WATCH_FOLDER = config["watch_folder"]
     DRIVE_SYNC_FOLDER = config["drive_sync_folder"]
@@ -327,6 +334,7 @@ def apply_config(config, args):
     LOG_FILE = config["log_file"]
     LOG_MAX_BYTES = config["log_max_bytes"]
     LOG_BACKUP_COUNT = config["log_backup_count"]
+    UPLOADED_TITLES_PATH = config["uploaded_titles_path"]
     configure_logging()
 
 def authenticate_youtube():
@@ -726,6 +734,46 @@ def process_pending_uploads(youtube_service):
 
     save_pending_uploads(PENDING_UPLOADS_PATH, remaining)
 
+def load_uploaded_titles(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if not isinstance(data, dict):
+            logging.warning("Uploaded titles cache is invalid: %s", path)
+            return {}
+        return data
+    except (OSError, json.JSONDecodeError) as exc:
+        logging.warning("Failed to load uploaded titles cache: %s", exc)
+        return {}
+
+def save_uploaded_titles(path, cache):
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(cache, handle, indent=2, sort_keys=True)
+    except OSError as exc:
+        logging.warning("Failed to save uploaded titles cache: %s", exc)
+
+def process_existing_files(handler):
+    entries = []
+    for name in os.listdir(WATCH_FOLDER):
+        full_path = os.path.join(WATCH_FOLDER, name)
+        if not os.path.isfile(full_path):
+            continue
+        if should_ignore_file(full_path):
+            continue
+        if not full_path.lower().endswith(".mp4"):
+            continue
+        entries.append(full_path)
+
+    entries.sort(key=lambda path: os.path.getmtime(path))
+    for path in entries:
+        try:
+            handler._process_video(path)
+        except (OSError, HttpError, ValueError) as exc:
+            logging.error("Failed to process %s in --once mode: %s", path, exc)
+
 class VideoHandler(FileSystemEventHandler):
     """File system event handler for video file monitoring."""
 
@@ -734,6 +782,7 @@ class VideoHandler(FileSystemEventHandler):
         self.youtube = youtube_service
         self.processing_files = set()  # Track files being processed
         self.pull_tracker = load_pull_tracker(PULL_TRACKER_PATH)
+        self.uploaded_titles = load_uploaded_titles(UPLOADED_TITLES_PATH)
 
     def on_created(self, event):
         """Handle file creation events."""
@@ -860,10 +909,15 @@ class VideoHandler(FileSystemEventHandler):
             if DRY_RUN:
                 logging.info("Dry run enabled; skipping upload and Drive sync.")
             else:
+                if youtube_title in self.uploaded_titles:
+                    logging.info("Skipping duplicate title: %s", youtube_title)
+                    move_to_drive(temp_path, DRIVE_SYNC_FOLDER)
+                    return
                 upload_succeeded = False
                 # Upload to YouTube
                 try:
-                    upload_to_youtube(
+                    start_time = time.time()
+                    video_url = upload_to_youtube(
                         self.youtube,
                         upload_path,
                         title=youtube_title,
@@ -874,7 +928,14 @@ class VideoHandler(FileSystemEventHandler):
                             "privacy_status": YOUTUBE_PRIVACY,
                         },
                     )
+                    elapsed = time.time() - start_time
+                    logging.info("Uploaded %s (%s) in %.1fs", youtube_title, video_url, elapsed)
                     upload_succeeded = True
+                    self.uploaded_titles[youtube_title] = {
+                        "url": video_url,
+                        "uploaded_at": datetime.datetime.now().isoformat(),
+                    }
+                    save_uploaded_titles(UPLOADED_TITLES_PATH, self.uploaded_titles)
                 except (HttpError, OSError) as exc:
                     logging.error("Upload failed, adding to pending queue: %s", exc)
                     pending = load_pending_uploads(PENDING_UPLOADS_PATH)
@@ -938,6 +999,10 @@ if __name__ == "__main__":
         youtube = authenticate_youtube()
         process_pending_uploads(youtube)
         event_handler = VideoHandler(youtube)
+        if args.once:
+            process_existing_files(event_handler)
+            logging.info("Finished --once run.")
+            sys.exit(0)
         observer = Observer()
         observer.schedule(event_handler, WATCH_FOLDER, recursive=False)
         observer.start()

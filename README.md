@@ -93,6 +93,12 @@ You can override config values on the CLI:
 python youtube_uploader.py --watch-folder "C:\Path\To\WarcraftRecorder" --dry-run
 ```
 
+Process existing files and exit:
+
+```bash
+python youtube_uploader.py --once
+```
+
 ### 3. First Run
 
 1. Place your `credentials.json` file in the project directory
@@ -156,6 +162,7 @@ python reset_pending_uploads.py
 | `log_file` | Log file path | `youtube_uploader.log` |
 | `log_max_bytes` | Max log size before rotation | `5000000` |
 | `log_backup_count` | Number of rotated logs to keep | `3` |
+| `uploaded_titles_path` | Uploaded title cache | `uploaded_titles.json` |
 
 ## File Naming
 
