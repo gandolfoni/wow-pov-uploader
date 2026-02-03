@@ -49,11 +49,10 @@ python --version
    ```
 
 2. **Configure via `config.json` (Recommended)**
-   - Create a `config.json` in the project folder:
+   - Create a minimal `config.json` in the project folder:
    ```json
    {
      "watch_folder": "C:\\Path\\To\\Your\\WarcraftRecorder",
-     "drive_sync_folder": "C:\\Users\\YourName\\GoogleDrive\\RaidVideos",
      "youtube_privacy": "unlisted",
      "default_description": "Raid Upload",
      "default_tags": ["World of Warcraft", "WoW", "Raid", "POV"],
@@ -63,22 +62,7 @@ python --version
      "stable_write_interval_seconds": 2,
      "min_file_age_seconds": 5,
      "ignore_patterns": ["*.tmp", "*.part", "*.crdownload"],
-     "ignore_extensions": [".tmp", ".part", ".crdownload"],
-     "pull_tracker_path": "pull_tracker.json",
-     "log_level": "INFO",
-     "compression_enabled": false,
-     "compression_preset": "medium",
-     "compression_crf": 23,
-     "compression_audio_bitrate": "128k",
-     "compression_max_width": null,
-     "max_retries": 5,
-     "retry_backoff_seconds": 5,
-     "retry_backoff_multiplier": 2,
-     "retry_jitter_seconds": 2,
-     "pending_uploads_path": "pending_uploads.json",
-     "log_file": "youtube_uploader.log",
-     "log_max_bytes": 5000000,
-     "log_backup_count": 3
+     "ignore_extensions": [".tmp", ".part", ".crdownload"]
    }
    ```
 

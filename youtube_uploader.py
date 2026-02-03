@@ -942,7 +942,15 @@ if __name__ == "__main__":
         observer.schedule(event_handler, WATCH_FOLDER, recursive=False)
         observer.start()
 
-        logging.info("Watching %s for new videos...", WATCH_FOLDER)
+        pending_count = len(load_pending_uploads(PENDING_UPLOADS_PATH))
+        compression_status = "on" if COMPRESSION_ENABLED else "off"
+        logging.info(
+            "Watching %s | privacy=%s | compression=%s | pending=%d",
+            WATCH_FOLDER,
+            YOUTUBE_PRIVACY,
+            compression_status,
+            pending_count,
+        )
         logging.info("Press Ctrl+C to stop")
 
         while True:

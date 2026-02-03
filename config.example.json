@@ -1,9 +1,6 @@
 {
   "watch_folder": "C:\\Path\\To\\WarcraftRecorder",
-  "drive_sync_folder": "C:\\Users\\You\\GoogleDrive\\RaidVideos",
   "youtube_playlist_id": null,
-  "season_start_date": "2024-09-01",
-  "scopes": ["https://www.googleapis.com/auth/youtube.upload"],
   "youtube_privacy": "unlisted",
   "default_description": "Raid Upload",
   "default_tags": ["World of Warcraft", "WoW", "Raid", "POV"],
@@ -14,18 +11,9 @@
   "ignore_patterns": ["*.tmp", "*.part", "*.partial", "*.crdownload", "*.download"],
   "ignore_extensions": [".tmp", ".part", ".crdownload"],
   "pull_tracker_path": "pull_tracker.json",
-  "log_level": "INFO",
   "compression_enabled": false,
   "compression_preset": "medium",
   "compression_crf": 23,
   "compression_audio_bitrate": "128k",
-  "compression_max_width": null,
-  "max_retries": 5,
-  "retry_backoff_seconds": 5,
-  "retry_backoff_multiplier": 2,
-  "retry_jitter_seconds": 2,
-  "pending_uploads_path": "pending_uploads.json",
-  "log_file": "youtube_uploader.log",
-  "log_max_bytes": 5000000,
-  "log_backup_count": 3
+  "max_retries": 5
 }
