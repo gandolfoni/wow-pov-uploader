@@ -75,7 +75,10 @@ python --version
      "retry_backoff_seconds": 5,
      "retry_backoff_multiplier": 2,
      "retry_jitter_seconds": 2,
-     "pending_uploads_path": "pending_uploads.json"
+     "pending_uploads_path": "pending_uploads.json",
+     "log_file": "youtube_uploader.log",
+     "log_max_bytes": 5000000,
+     "log_backup_count": 3
    }
    ```
 
@@ -106,6 +109,7 @@ python --version
    - Place a test MP4 file in your watch folder
    - The script should detect it and start processing
    - Check the console output and `youtube_uploader.log` for progress
+   - If needed, clear the pending queue: `python reset_pending_uploads.py`
 
 ## Step 5: Optional Configurations
 

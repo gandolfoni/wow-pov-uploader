@@ -96,7 +96,10 @@ Create a `config.json` in the project root:
   "retry_backoff_seconds": 5,
   "retry_backoff_multiplier": 2,
   "retry_jitter_seconds": 2,
-  "pending_uploads_path": "pending_uploads.json"
+  "pending_uploads_path": "pending_uploads.json",
+  "log_file": "youtube_uploader.log",
+  "log_max_bytes": 5000000,
+  "log_backup_count": 3
 }
 ```
 
@@ -133,6 +136,10 @@ python youtube_uploader.py
    - Video is optionally synced to Google Drive
    - Original backup is removed after successful upload
 4. If an upload fails, it is placed in `pending_uploads.json` and retried on next run
+5. To clear the queue manually, run:
+```bash
+python reset_pending_uploads.py
+```
 
 ## Configuration Options
 
@@ -162,6 +169,9 @@ python youtube_uploader.py
 | `retry_backoff_multiplier` | Backoff multiplier | `2` |
 | `retry_jitter_seconds` | Retry jitter | `2` |
 | `pending_uploads_path` | Pending upload queue | `pending_uploads.json` |
+| `log_file` | Log file path | `youtube_uploader.log` |
+| `log_max_bytes` | Max log size before rotation | `5000000` |
+| `log_backup_count` | Number of rotated logs to keep | `3` |
 
 ## File Naming
 
@@ -199,6 +209,10 @@ The script creates detailed logs in `youtube_uploader.log` including:
 5. **Compression not working**
    - Ensure `ffmpeg` is installed and available on PATH
    - Set `compression_enabled` to `true` in `config.json`
+
+6. **Uploads stuck in queue**
+   - Check `pending_uploads.json` entries are valid paths
+   - Run `python reset_pending_uploads.py` to clear the queue
 
 ## Security Notes
 

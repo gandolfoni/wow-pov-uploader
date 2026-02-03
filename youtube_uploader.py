@@ -4,6 +4,7 @@ import time
 import datetime
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import shutil
 import sys
 import argparse
@@ -54,6 +55,9 @@ CONFIG_DEFAULTS = {
     "retry_backoff_multiplier": 2,
     "retry_jitter_seconds": 2,
     "pending_uploads_path": "pending_uploads.json",
+    "log_file": "youtube_uploader.log",
+    "log_max_bytes": 5_000_000,
+    "log_backup_count": 3,
 }
 
 WATCH_FOLDER = CONFIG_DEFAULTS["watch_folder"]
@@ -82,16 +86,29 @@ RETRY_BACKOFF_SECONDS = CONFIG_DEFAULTS["retry_backoff_seconds"]
 RETRY_BACKOFF_MULTIPLIER = CONFIG_DEFAULTS["retry_backoff_multiplier"]
 RETRY_JITTER_SECONDS = CONFIG_DEFAULTS["retry_jitter_seconds"]
 PENDING_UPLOADS_PATH = CONFIG_DEFAULTS["pending_uploads_path"]
+LOG_FILE = CONFIG_DEFAULTS["log_file"]
+LOG_MAX_BYTES = CONFIG_DEFAULTS["log_max_bytes"]
+LOG_BACKUP_COUNT = CONFIG_DEFAULTS["log_backup_count"]
 
 # Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('youtube_uploader.log'),
-        logging.StreamHandler()
-    ]
-)
+def configure_logging():
+    logger = logging.getLogger()
+    logger.setLevel(LOG_LEVEL)
+
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+    file_handler = RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+
+    logger.handlers = [file_handler, stream_handler]
 # ----------------------------
 
 def _merge_config(defaults, overrides):
@@ -145,7 +162,57 @@ def parse_args():
     parser.add_argument("--retry-backoff-seconds", type=int, help="Initial retry backoff in seconds")
     parser.add_argument("--retry-backoff-multiplier", type=int, help="Retry backoff multiplier")
     parser.add_argument("--retry-jitter-seconds", type=int, help="Random jitter seconds added to backoff")
+    parser.add_argument("--log-file", help="Log file path")
+    parser.add_argument("--log-max-bytes", type=int, help="Max log size in bytes before rotation")
+    parser.add_argument("--log-backup-count", type=int, help="Number of rotated log files to keep")
     return parser.parse_args()
+
+def _validate_positive_int(value, name):
+    if value is None:
+        return
+    if not isinstance(value, int) or value < 0:
+        logging.warning("%s should be a non-negative integer. Got: %s", name, value)
+
+def _validate_string(value, name):
+    if value is None:
+        return
+    if not isinstance(value, str) or not value.strip():
+        logging.warning("%s should be a non-empty string. Got: %s", name, value)
+
+def validate_config(config):
+    _validate_string(config.get("watch_folder"), "watch_folder")
+    _validate_string(config.get("youtube_privacy"), "youtube_privacy")
+    _validate_string(config.get("default_description"), "default_description")
+    _validate_positive_int(config.get("stable_write_checks"), "stable_write_checks")
+    _validate_positive_int(config.get("stable_write_interval_seconds"), "stable_write_interval_seconds")
+    _validate_positive_int(config.get("min_file_age_seconds"), "min_file_age_seconds")
+    _validate_positive_int(config.get("compression_crf"), "compression_crf")
+    _validate_positive_int(config.get("max_retries"), "max_retries")
+    _validate_positive_int(config.get("retry_backoff_seconds"), "retry_backoff_seconds")
+    _validate_positive_int(config.get("retry_backoff_multiplier"), "retry_backoff_multiplier")
+    _validate_positive_int(config.get("retry_jitter_seconds"), "retry_jitter_seconds")
+    _validate_positive_int(config.get("log_max_bytes"), "log_max_bytes")
+    _validate_positive_int(config.get("log_backup_count"), "log_backup_count")
+
+    privacy = config.get("youtube_privacy")
+    if privacy not in {"unlisted", "private", "public"}:
+        logging.warning("youtube_privacy should be unlisted/private/public. Got: %s", privacy)
+
+    scopes = config.get("scopes")
+    if scopes is not None and not isinstance(scopes, list):
+        logging.warning("scopes should be a list. Got: %s", scopes)
+
+    tags = config.get("default_tags")
+    if tags is not None and not isinstance(tags, list):
+        logging.warning("default_tags should be a list. Got: %s", tags)
+
+    ignore_patterns = config.get("ignore_patterns")
+    if ignore_patterns is not None and not isinstance(ignore_patterns, list):
+        logging.warning("ignore_patterns should be a list. Got: %s", ignore_patterns)
+
+    ignore_extensions = config.get("ignore_extensions")
+    if ignore_extensions is not None and not isinstance(ignore_extensions, list):
+        logging.warning("ignore_extensions should be a list. Got: %s", ignore_extensions)
 
 def apply_config(config, args):
     global WATCH_FOLDER
@@ -174,6 +241,9 @@ def apply_config(config, args):
     global RETRY_BACKOFF_MULTIPLIER
     global RETRY_JITTER_SECONDS
     global PENDING_UPLOADS_PATH
+    global LOG_FILE
+    global LOG_MAX_BYTES
+    global LOG_BACKUP_COUNT
 
     if args.watch_folder:
         config["watch_folder"] = args.watch_folder
@@ -221,6 +291,12 @@ def apply_config(config, args):
         config["retry_backoff_multiplier"] = args.retry_backoff_multiplier
     if args.retry_jitter_seconds is not None:
         config["retry_jitter_seconds"] = args.retry_jitter_seconds
+    if args.log_file is not None:
+        config["log_file"] = args.log_file
+    if args.log_max_bytes is not None:
+        config["log_max_bytes"] = args.log_max_bytes
+    if args.log_backup_count is not None:
+        config["log_backup_count"] = args.log_backup_count
 
     WATCH_FOLDER = config["watch_folder"]
     DRIVE_SYNC_FOLDER = config["drive_sync_folder"]
@@ -248,8 +324,10 @@ def apply_config(config, args):
     RETRY_BACKOFF_MULTIPLIER = config["retry_backoff_multiplier"]
     RETRY_JITTER_SECONDS = config["retry_jitter_seconds"]
     PENDING_UPLOADS_PATH = config["pending_uploads_path"]
-
-    logging.getLogger().setLevel(LOG_LEVEL)
+    LOG_FILE = config["log_file"]
+    LOG_MAX_BYTES = config["log_max_bytes"]
+    LOG_BACKUP_COUNT = config["log_backup_count"]
+    configure_logging()
 
 def authenticate_youtube():
     creds = None
@@ -840,8 +918,10 @@ class VideoHandler(FileSystemEventHandler):
 
 if __name__ == "__main__":
     try:
+        configure_logging()
         args = parse_args()
         config = load_config(args.config)
+        validate_config(config)
         apply_config(config, args)
 
         # Validate configuration
