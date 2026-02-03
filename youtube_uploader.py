@@ -8,6 +8,8 @@ import shutil
 import sys
 import argparse
 import fnmatch
+import subprocess
+import random
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -42,6 +44,16 @@ CONFIG_DEFAULTS = {
     "ignore_extensions": [".tmp", ".part", ".crdownload"],
     "pull_tracker_path": "pull_tracker.json",
     "log_level": "INFO",
+    "compression_enabled": False,
+    "compression_preset": "medium",
+    "compression_crf": 23,
+    "compression_audio_bitrate": "128k",
+    "compression_max_width": None,
+    "max_retries": 5,
+    "retry_backoff_seconds": 5,
+    "retry_backoff_multiplier": 2,
+    "retry_jitter_seconds": 2,
+    "pending_uploads_path": "pending_uploads.json",
 }
 
 WATCH_FOLDER = CONFIG_DEFAULTS["watch_folder"]
@@ -60,6 +72,16 @@ IGNORE_PATTERNS = CONFIG_DEFAULTS["ignore_patterns"]
 IGNORE_EXTENSIONS = CONFIG_DEFAULTS["ignore_extensions"]
 PULL_TRACKER_PATH = CONFIG_DEFAULTS["pull_tracker_path"]
 LOG_LEVEL = CONFIG_DEFAULTS["log_level"]
+COMPRESSION_ENABLED = CONFIG_DEFAULTS["compression_enabled"]
+COMPRESSION_PRESET = CONFIG_DEFAULTS["compression_preset"]
+COMPRESSION_CRF = CONFIG_DEFAULTS["compression_crf"]
+COMPRESSION_AUDIO_BITRATE = CONFIG_DEFAULTS["compression_audio_bitrate"]
+COMPRESSION_MAX_WIDTH = CONFIG_DEFAULTS["compression_max_width"]
+MAX_RETRIES = CONFIG_DEFAULTS["max_retries"]
+RETRY_BACKOFF_SECONDS = CONFIG_DEFAULTS["retry_backoff_seconds"]
+RETRY_BACKOFF_MULTIPLIER = CONFIG_DEFAULTS["retry_backoff_multiplier"]
+RETRY_JITTER_SECONDS = CONFIG_DEFAULTS["retry_jitter_seconds"]
+PENDING_UPLOADS_PATH = CONFIG_DEFAULTS["pending_uploads_path"]
 
 # Setup logging
 logging.basicConfig(
@@ -114,6 +136,15 @@ def parse_args():
     parser.add_argument("--ignore-patterns", help="Comma-separated ignore patterns (fnmatch)")
     parser.add_argument("--ignore-extensions", help="Comma-separated ignore extensions (.tmp,.part)")
     parser.add_argument("--log-level", help="Logging level (DEBUG, INFO, WARNING, ERROR)")
+    parser.add_argument("--compression-enabled", action="store_true", help="Enable ffmpeg compression")
+    parser.add_argument("--compression-preset", help="ffmpeg preset (ultrafast..veryslow)")
+    parser.add_argument("--compression-crf", type=int, help="ffmpeg CRF value (lower is higher quality)")
+    parser.add_argument("--compression-audio-bitrate", help="ffmpeg audio bitrate (e.g., 128k)")
+    parser.add_argument("--compression-max-width", type=int, help="Scale to max width (preserve aspect)")
+    parser.add_argument("--max-retries", type=int, help="Max upload retries")
+    parser.add_argument("--retry-backoff-seconds", type=int, help="Initial retry backoff in seconds")
+    parser.add_argument("--retry-backoff-multiplier", type=int, help="Retry backoff multiplier")
+    parser.add_argument("--retry-jitter-seconds", type=int, help="Random jitter seconds added to backoff")
     return parser.parse_args()
 
 def apply_config(config, args):
@@ -133,6 +164,16 @@ def apply_config(config, args):
     global IGNORE_EXTENSIONS
     global PULL_TRACKER_PATH
     global LOG_LEVEL
+    global COMPRESSION_ENABLED
+    global COMPRESSION_PRESET
+    global COMPRESSION_CRF
+    global COMPRESSION_AUDIO_BITRATE
+    global COMPRESSION_MAX_WIDTH
+    global MAX_RETRIES
+    global RETRY_BACKOFF_SECONDS
+    global RETRY_BACKOFF_MULTIPLIER
+    global RETRY_JITTER_SECONDS
+    global PENDING_UPLOADS_PATH
 
     if args.watch_folder:
         config["watch_folder"] = args.watch_folder
@@ -162,6 +203,24 @@ def apply_config(config, args):
         config["ignore_extensions"] = [e.strip() for e in args.ignore_extensions.split(",") if e.strip()]
     if args.log_level is not None:
         config["log_level"] = args.log_level
+    if args.compression_enabled:
+        config["compression_enabled"] = True
+    if args.compression_preset is not None:
+        config["compression_preset"] = args.compression_preset
+    if args.compression_crf is not None:
+        config["compression_crf"] = args.compression_crf
+    if args.compression_audio_bitrate is not None:
+        config["compression_audio_bitrate"] = args.compression_audio_bitrate
+    if args.compression_max_width is not None:
+        config["compression_max_width"] = args.compression_max_width
+    if args.max_retries is not None:
+        config["max_retries"] = args.max_retries
+    if args.retry_backoff_seconds is not None:
+        config["retry_backoff_seconds"] = args.retry_backoff_seconds
+    if args.retry_backoff_multiplier is not None:
+        config["retry_backoff_multiplier"] = args.retry_backoff_multiplier
+    if args.retry_jitter_seconds is not None:
+        config["retry_jitter_seconds"] = args.retry_jitter_seconds
 
     WATCH_FOLDER = config["watch_folder"]
     DRIVE_SYNC_FOLDER = config["drive_sync_folder"]
@@ -179,6 +238,16 @@ def apply_config(config, args):
     IGNORE_EXTENSIONS = config["ignore_extensions"]
     PULL_TRACKER_PATH = config["pull_tracker_path"]
     LOG_LEVEL = config["log_level"]
+    COMPRESSION_ENABLED = config["compression_enabled"]
+    COMPRESSION_PRESET = config["compression_preset"]
+    COMPRESSION_CRF = config["compression_crf"]
+    COMPRESSION_AUDIO_BITRATE = config["compression_audio_bitrate"]
+    COMPRESSION_MAX_WIDTH = config["compression_max_width"]
+    MAX_RETRIES = config["max_retries"]
+    RETRY_BACKOFF_SECONDS = config["retry_backoff_seconds"]
+    RETRY_BACKOFF_MULTIPLIER = config["retry_backoff_multiplier"]
+    RETRY_JITTER_SECONDS = config["retry_jitter_seconds"]
+    PENDING_UPLOADS_PATH = config["pending_uploads_path"]
 
     logging.getLogger().setLevel(LOG_LEVEL)
 
@@ -368,69 +437,143 @@ def build_upload_request(title, description, tags, privacy_status):
         }
     }
 
+def _ffmpeg_available():
+    return shutil.which("ffmpeg") is not None
+
+def _build_ffmpeg_command(input_path, output_path):
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_path,
+        "-c:v",
+        "libx264",
+        "-preset",
+        str(COMPRESSION_PRESET),
+        "-crf",
+        str(COMPRESSION_CRF),
+        "-c:a",
+        "aac",
+        "-b:a",
+        str(COMPRESSION_AUDIO_BITRATE),
+    ]
+    if COMPRESSION_MAX_WIDTH:
+        cmd += ["-vf", f"scale='min({COMPRESSION_MAX_WIDTH},iw)':-2"]
+    cmd.append(output_path)
+    return cmd
+
+def compress_video(input_path):
+    if not COMPRESSION_ENABLED:
+        return input_path, False
+    if not _ffmpeg_available():
+        logging.warning("ffmpeg not found in PATH; skipping compression.")
+        return input_path, False
+
+    base, ext = os.path.splitext(input_path)
+    output_path = base + ".compressed" + ext
+    cmd = _build_ffmpeg_command(input_path, output_path)
+
+    logging.info("Compressing via ffmpeg: %s", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        logging.error("Compression failed: %s", exc)
+        return input_path, False
+
+    if not os.path.exists(output_path):
+        logging.error("Compression output missing: %s", output_path)
+        return input_path, False
+
+    return output_path, True
+
+def _should_retry_http_error(exc):
+    status = getattr(exc, "status_code", None)
+    if status is None and hasattr(exc, "resp"):
+        status = getattr(exc.resp, "status", None)
+    return status in {429, 500, 502, 503, 504}
+
+def _sleep_backoff(attempt):
+    base = RETRY_BACKOFF_SECONDS * (RETRY_BACKOFF_MULTIPLIER ** attempt)
+    jitter = random.uniform(0, RETRY_JITTER_SECONDS)
+    time.sleep(base + jitter)
+
 def upload_to_youtube(youtube_service, file_path, title, upload_options):
     """Upload video to YouTube with error handling and progress tracking."""
-    try:
-        logging.info("Starting upload: %s", title)
+    logging.info("Starting upload: %s", title)
 
-        # Check if file exists and get size
-        if not os.path.exists(file_path):
-            raise FileNotFoundError("Video file not found: %s" % file_path)
+    # Check if file exists and get size
+    if not os.path.exists(file_path):
+        raise FileNotFoundError("Video file not found: %s" % file_path)
 
-        file_size = os.path.getsize(file_path)
-        logging.info("File size: %.1f MB", file_size / (1024*1024))
+    file_size = os.path.getsize(file_path)
+    logging.info("File size: %.1f MB", file_size / (1024*1024))
 
-        request_body = build_upload_request(
-            title,
-            upload_options["description"],
-            upload_options["tags"],
-            upload_options["privacy_status"],
-        )
+    request_body = build_upload_request(
+        title,
+        upload_options["description"],
+        upload_options["tags"],
+        upload_options["privacy_status"],
+    )
 
-        media = MediaFileUpload(file_path, chunksize=-1, resumable=True)
-        request = youtube_service.videos().insert(
-            part="snippet,status",
-            body=request_body,
-            media_body=media
-        )
+    last_exc = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            media = MediaFileUpload(file_path, chunksize=-1, resumable=True)
+            request = youtube_service.videos().insert(
+                part="snippet,status",
+                body=request_body,
+                media_body=media
+            )
 
-        response = None
-        while response is None:
-            try:
+            response = None
+            while response is None:
                 status, response = request.next_chunk()
                 if status:
                     progress = int(status.progress() * 100)
                     logging.info("Upload progress: %d%%", progress)
-            except HttpError as exc:
-                logging.error("Upload chunk failed: %s", exc)
-                raise
 
-        video_id = response["id"]
-        video_url = "https://youtu.be/%s" % video_id
-        logging.info("Upload complete: %s", video_url)
+            video_id = response["id"]
+            video_url = "https://youtu.be/%s" % video_id
+            logging.info("Upload complete: %s", video_url)
 
-        # Add to playlist if requested
-        playlist_id = upload_options["playlist_id"]
-        if playlist_id:
-            try:
-                youtube_service.playlistItems().insert(
-                    part="snippet",
-                    body={
-                        "snippet": {
-                            "playlistId": playlist_id,
-                            "resourceId": {"kind": "youtube#video", "videoId": video_id}
+            # Add to playlist if requested
+            playlist_id = upload_options["playlist_id"]
+            if playlist_id:
+                try:
+                    youtube_service.playlistItems().insert(
+                        part="snippet",
+                        body={
+                            "snippet": {
+                                "playlistId": playlist_id,
+                                "resourceId": {"kind": "youtube#video", "videoId": video_id}
+                            }
                         }
-                    }
-                ).execute()
-                logging.info("Added to playlist: %s", playlist_id)
-            except HttpError as exc:
-                logging.error("Failed to add to playlist: %s", exc)
+                    ).execute()
+                    logging.info("Added to playlist: %s", playlist_id)
+                except HttpError as exc:
+                    logging.error("Failed to add to playlist: %s", exc)
 
-        return video_url
+            return video_url
 
-    except (HttpError, OSError) as exc:
-        logging.error("YouTube upload failed: %s", exc)
-        raise
+        except HttpError as exc:
+            last_exc = exc
+            if attempt >= MAX_RETRIES or not _should_retry_http_error(exc):
+                logging.error("YouTube upload failed: %s", exc)
+                raise
+            logging.warning("Upload failed; retrying (%d/%d): %s", attempt + 1, MAX_RETRIES, exc)
+            _sleep_backoff(attempt)
+        except OSError as exc:
+            last_exc = exc
+            if attempt >= MAX_RETRIES:
+                logging.error("YouTube upload failed: %s", exc)
+                raise
+            logging.warning("Upload failed; retrying (%d/%d): %s", attempt + 1, MAX_RETRIES, exc)
+            _sleep_backoff(attempt)
+
+    if last_exc:
+        raise last_exc
+
+    raise RuntimeError("Upload failed without exception.")
 
 def move_to_drive(file_path, dest_folder):
     """Move file to Google Drive sync folder."""
@@ -440,6 +583,57 @@ def move_to_drive(file_path, dest_folder):
     new_path = os.path.join(dest_folder, os.path.basename(file_path))
     os.rename(file_path, new_path)
     logging.info("Copied to Drive sync folder: %s", new_path)
+
+def load_pending_uploads(path):
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if not isinstance(data, list):
+            logging.warning("Pending uploads file is invalid: %s", path)
+            return []
+        return data
+    except (OSError, json.JSONDecodeError) as exc:
+        logging.warning("Failed to load pending uploads: %s", exc)
+        return []
+
+def save_pending_uploads(path, pending):
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(pending, handle, indent=2, sort_keys=True)
+    except OSError as exc:
+        logging.warning("Failed to save pending uploads: %s", exc)
+
+def process_pending_uploads(youtube_service):
+    pending = load_pending_uploads(PENDING_UPLOADS_PATH)
+    if not pending:
+        return
+
+    logging.info("Processing %d pending uploads...", len(pending))
+    remaining = []
+    for item in pending:
+        file_path = item.get("file_path")
+        title = item.get("title")
+        upload_options = item.get("upload_options")
+        if not file_path or not title or not upload_options:
+            logging.warning("Skipping invalid pending upload entry: %s", item)
+            continue
+        if not os.path.exists(file_path):
+            logging.warning("Pending file missing, skipping: %s", file_path)
+            continue
+
+        try:
+            if DRY_RUN:
+                logging.info("Dry run enabled; skipping pending upload for %s", title)
+                remaining.append(item)
+                continue
+            upload_to_youtube(youtube_service, file_path, title, upload_options)
+        except (HttpError, OSError, ValueError) as exc:
+            logging.error("Pending upload failed, keeping in queue: %s", exc)
+            remaining.append(item)
+
+    save_pending_uploads(PENDING_UPLOADS_PATH, remaining)
 
 class VideoHandler(FileSystemEventHandler):
     """File system event handler for video file monitoring."""
@@ -567,21 +761,47 @@ class VideoHandler(FileSystemEventHandler):
             # Create a more descriptive YouTube title
             youtube_title = self._create_youtube_title(new_name)
 
+            upload_path = temp_path
+            compressed = False
+            if not DRY_RUN:
+                upload_path, compressed = compress_video(temp_path)
+
             if DRY_RUN:
                 logging.info("Dry run enabled; skipping upload and Drive sync.")
             else:
+                upload_succeeded = False
                 # Upload to YouTube
-                upload_to_youtube(
-                    self.youtube,
-                    temp_path,
-                    title=youtube_title,
-                    upload_options={
-                        "description": DEFAULT_DESCRIPTION,
-                        "playlist_id": YOUTUBE_PLAYLIST_ID,
-                        "tags": DEFAULT_TAGS,
-                        "privacy_status": YOUTUBE_PRIVACY,
-                    },
-                )
+                try:
+                    upload_to_youtube(
+                        self.youtube,
+                        upload_path,
+                        title=youtube_title,
+                        upload_options={
+                            "description": DEFAULT_DESCRIPTION,
+                            "playlist_id": YOUTUBE_PLAYLIST_ID,
+                            "tags": DEFAULT_TAGS,
+                            "privacy_status": YOUTUBE_PRIVACY,
+                        },
+                    )
+                    upload_succeeded = True
+                except (HttpError, OSError) as exc:
+                    logging.error("Upload failed, adding to pending queue: %s", exc)
+                    pending = load_pending_uploads(PENDING_UPLOADS_PATH)
+                    pending.append({
+                        "file_path": upload_path,
+                        "title": youtube_title,
+                        "upload_options": {
+                            "description": DEFAULT_DESCRIPTION,
+                            "playlist_id": YOUTUBE_PLAYLIST_ID,
+                            "tags": DEFAULT_TAGS,
+                            "privacy_status": YOUTUBE_PRIVACY,
+                        },
+                    })
+                    save_pending_uploads(PENDING_UPLOADS_PATH, pending)
+                    raise
+                finally:
+                    if compressed and upload_succeeded and os.path.exists(upload_path):
+                        os.remove(upload_path)
 
                 # Copy to Drive folder (optional)
                 move_to_drive(temp_path, DRIVE_SYNC_FOLDER)
@@ -615,6 +835,7 @@ if __name__ == "__main__":
 
         logging.info("Starting YouTube Uploader...")
         youtube = authenticate_youtube()
+        process_pending_uploads(youtube)
         event_handler = VideoHandler(youtube)
         observer = Observer()
         observer.schedule(event_handler, WATCH_FOLDER, recursive=False)

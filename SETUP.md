@@ -65,7 +65,17 @@ python --version
      "ignore_patterns": ["*.tmp", "*.part", "*.crdownload"],
      "ignore_extensions": [".tmp", ".part", ".crdownload"],
      "pull_tracker_path": "pull_tracker.json",
-     "log_level": "INFO"
+     "log_level": "INFO",
+     "compression_enabled": false,
+     "compression_preset": "medium",
+     "compression_crf": 23,
+     "compression_audio_bitrate": "128k",
+     "compression_max_width": null,
+     "max_retries": 5,
+     "retry_backoff_seconds": 5,
+     "retry_backoff_multiplier": 2,
+     "retry_jitter_seconds": 2,
+     "pending_uploads_path": "pending_uploads.json"
    }
    ```
 
@@ -111,6 +121,10 @@ python --version
 1. Install Google Drive desktop app
 2. Create a folder for your videos
 3. Update `DRIVE_SYNC_FOLDER` path in the script
+
+### ffmpeg Compression (Optional)
+1. Install ffmpeg and ensure it is on your PATH
+2. Set `compression_enabled` to `true` in `config.json`
 
 ## Troubleshooting
 

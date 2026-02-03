@@ -23,6 +23,8 @@ An automated YouTube uploader for World of Warcraft POV (Point of View) videos. 
 - 🎵 **Playlist Support**: Automatically adds videos to specified YouTube playlists
 - 📊 **Progress Tracking**: Real-time upload progress and comprehensive logging
 - 🔒 **Secure**: Uses OAuth2 for YouTube API authentication
+- 🗜️ **Optional Compression**: ffmpeg-based compression before upload
+- 🔁 **Retries + Queue**: Automatic retry/backoff and a persisted pending upload queue
 
 ## 🚀 Quick Start
 
@@ -84,7 +86,17 @@ Create a `config.json` in the project root:
   "ignore_patterns": ["*.tmp", "*.part", "*.crdownload"],
   "ignore_extensions": [".tmp", ".part", ".crdownload"],
   "pull_tracker_path": "pull_tracker.json",
-  "log_level": "INFO"
+  "log_level": "INFO",
+  "compression_enabled": false,
+  "compression_preset": "medium",
+  "compression_crf": 23,
+  "compression_audio_bitrate": "128k",
+  "compression_max_width": null,
+  "max_retries": 5,
+  "retry_backoff_seconds": 5,
+  "retry_backoff_multiplier": 2,
+  "retry_jitter_seconds": 2,
+  "pending_uploads_path": "pending_uploads.json"
 }
 ```
 
@@ -116,9 +128,11 @@ python youtube_uploader.py
 2. The script will monitor the configured folder for new MP4 files
 3. When a new video is detected:
    - File is backed up
+   - Optional ffmpeg compression is applied
    - Video is uploaded to YouTube as "unlisted"
    - Video is optionally synced to Google Drive
    - Original backup is removed after successful upload
+4. If an upload fails, it is placed in `pending_uploads.json` and retried on next run
 
 ## Configuration Options
 
@@ -138,6 +152,16 @@ python youtube_uploader.py
 | `ignore_extensions` | Extensions to ignore | `.tmp, .part, .crdownload` |
 | `pull_tracker_path` | Persisted pull counter file path | `pull_tracker.json` |
 | `log_level` | Logging level | `INFO` |
+| `compression_enabled` | Enable ffmpeg compression | `false` |
+| `compression_preset` | ffmpeg preset | `medium` |
+| `compression_crf` | ffmpeg CRF value | `23` |
+| `compression_audio_bitrate` | ffmpeg audio bitrate | `128k` |
+| `compression_max_width` | Scale to max width | `null` |
+| `max_retries` | Upload retry attempts | `5` |
+| `retry_backoff_seconds` | Base retry backoff | `5` |
+| `retry_backoff_multiplier` | Backoff multiplier | `2` |
+| `retry_jitter_seconds` | Retry jitter | `2` |
+| `pending_uploads_path` | Pending upload queue | `pending_uploads.json` |
 
 ## File Naming
 
@@ -171,6 +195,10 @@ The script creates detailed logs in `youtube_uploader.log` including:
    - Ensure the watch folder path is correct
    - Check that files are .mp4 format
    - Verify folder permissions
+
+5. **Compression not working**
+   - Ensure `ffmpeg` is installed and available on PATH
+   - Set `compression_enabled` to `true` in `config.json`
 
 ## Security Notes
 
