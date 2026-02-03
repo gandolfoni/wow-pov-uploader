@@ -14,6 +14,7 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from googleapiclient.errors import HttpError
 
 # ---------- CONFIG ----------
 WATCH_FOLDER = r"C:\Path\To\WarcraftRecorder"
@@ -60,31 +61,30 @@ def authenticate_youtube():
 
 def extract_context_from_filename(filename):
     """Extract context information from Warcraft Recorder filename.
-    
+
     Expected format: YYYY-MM-DD HH-MM-SS - Marpally - [Context]...
     Returns: (date, time, context)
     """
     try:
         # Remove file extension
         name = os.path.splitext(filename)[0]
-        
+
         # Split by " - " to get parts
         parts = name.split(" - ")
         if len(parts) >= 3:
             timestamp_part = parts[0]  # "2025-09-03 22-16-58"
-            player_part = parts[1]     # "Marpally"
             context_part = parts[2]    # "Fo..." or "Th..." etc.
-            
+
             # Parse timestamp
             date_time = datetime.datetime.strptime(timestamp_part, "%Y-%m-%d %H-%M-%S")
-            
+
             # Extract context (remove "..." if present)
             context = context_part.replace("...", "").strip()
-            
+
             return date_time, context
-    except Exception as e:
-        logging.warning(f"Could not parse filename {filename}: {e}")
-    
+    except (ValueError, IndexError) as exc:
+        logging.warning("Could not parse filename %s: %s", filename, exc)
+
     # Fallback to current time and generic context
     return datetime.datetime.now(), "Unknown"
 
@@ -107,7 +107,7 @@ def save_pull_tracker(path, tracker):
 
 def get_raid_week(start_date=None):
     """Calculate raid week number from season start date.
-    
+
     Args:
         start_date: Season start date (defaults to SEASON_START_DATE config)
     Returns:
@@ -120,7 +120,7 @@ def get_raid_week(start_date=None):
         except ValueError:
             # Fallback to default if config is invalid
             start_date = datetime.date(2024, 9, 1)
-    
+
     today = datetime.date.today()
     days_diff = (today - start_date).days
     week_num = max(1, (days_diff // 7) + 1)  # Ensure at least week 1
@@ -128,53 +128,53 @@ def get_raid_week(start_date=None):
 
 def get_boss_pull_count(boss_name, date, pull_tracker):
     """Get the pull count for a specific boss on a specific date.
-    
+
     Args:
         boss_name: Name of the boss/encounter
         date: Date of the encounter
         pull_tracker: Dictionary to track pull counts
-        
+
     Returns:
         Pull number for this boss on this date
     """
     date_key = date.strftime("%Y-%m-%d")
     boss_key = f"{date_key}_{boss_name}"
-    
+
     if boss_key not in pull_tracker:
         pull_tracker[boss_key] = 0
-    
+
     pull_tracker[boss_key] += 1
     return pull_tracker[boss_key]
 
 def make_nice_name(file_path, pull_tracker=None):
     """Generate a context-aware filename with raid week, boss, and pull tracking.
-    
+
     Format: RaidWeek_BossName_Pull#_Date_Time.mp4
     Example: W1_Fo_Pull1_Sep03_10-16PM.mp4
     """
     if pull_tracker is None:
         pull_tracker = {}
-    
+
     filename = os.path.basename(file_path)
     _, ext = os.path.splitext(filename)
-    
+
     # Extract context from Warcraft Recorder filename
     record_time, context = extract_context_from_filename(filename)
-    
+
     # Get raid week
     raid_week = get_raid_week()
-    
+
     # Get pull count for this boss on this date
     pull_count = get_boss_pull_count(context, record_time.date(), pull_tracker)
-    
+
     # Format date and time
     date_str = record_time.strftime("%b%d")  # Sep03, Oct15, etc.
     time_str = record_time.strftime("%I-%M%p")  # 10-16PM, 2-30AM, etc.
-    
+
     # Create the new filename
     new_name = f"{raid_week}_{context}_Pull{pull_count}_{date_str}_{time_str}{ext}"
-    
-    logging.info(f"Renamed: {filename} -> {new_name}")
+
+    logging.info("Renamed: %s -> %s", filename, new_name)
     return new_name
 
 def wait_for_file_stable(file_path):
@@ -184,7 +184,9 @@ def wait_for_file_stable(file_path):
 
     while stable_checks < STABLE_WRITE_CHECKS:
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File disappeared before processing: {file_path}")
+            raise FileNotFoundError(
+                "File disappeared before processing: %s" % file_path
+            )
         current_size = os.path.getsize(file_path)
         if current_size == previous_size:
             stable_checks += 1
@@ -193,38 +195,38 @@ def wait_for_file_stable(file_path):
         previous_size = current_size
         time.sleep(STABLE_WRITE_INTERVAL_SECONDS)
 
+def build_upload_request(title, description, tags, privacy_status):
+    return {
+        "snippet": {
+            "title": title,
+            "description": description,
+            "categoryId": "20",  # Gaming
+            "tags": tags
+        },
+        "status": {
+            "privacyStatus": privacy_status
+        }
+    }
 
-def upload_to_youtube(youtube_service, file_path, title, description=None,
-                     playlist_id=None, tags=None, privacy_status=None):
+
+def upload_to_youtube(youtube_service, file_path, title, upload_options):
     """Upload video to YouTube with error handling and progress tracking."""
     try:
         logging.info("Starting upload: %s", title)
 
         # Check if file exists and get size
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Video file not found: {file_path}")
+            raise FileNotFoundError("Video file not found: %s" % file_path)
 
         file_size = os.path.getsize(file_path)
         logging.info("File size: %.1f MB", file_size / (1024*1024))
 
-        if description is None:
-            description = DEFAULT_DESCRIPTION
-        if tags is None:
-            tags = DEFAULT_TAGS
-        if privacy_status is None:
-            privacy_status = YOUTUBE_PRIVACY
-
-        request_body = {
-            "snippet": {
-                "title": title,
-                "description": description,
-                "categoryId": "20",  # Gaming
-                "tags": tags
-            },
-            "status": {
-                "privacyStatus": privacy_status
-            }
-        }
+        request_body = build_upload_request(
+            title,
+            upload_options["description"],
+            upload_options["tags"],
+            upload_options["privacy_status"],
+        )
 
         media = MediaFileUpload(file_path, chunksize=-1, resumable=True)
         request = youtube_service.videos().insert(
@@ -240,15 +242,16 @@ def upload_to_youtube(youtube_service, file_path, title, description=None,
                 if status:
                     progress = int(status.progress() * 100)
                     logging.info("Upload progress: %d%%", progress)
-            except Exception as e:
-                logging.error("Upload chunk failed: %s", e)
+            except HttpError as exc:
+                logging.error("Upload chunk failed: %s", exc)
                 raise
 
-        video_id = response['id']
-        video_url = f"https://youtu.be/{video_id}"
+        video_id = response["id"]
+        video_url = "https://youtu.be/%s" % video_id
         logging.info("Upload complete: %s", video_url)
 
         # Add to playlist if requested
+        playlist_id = upload_options["playlist_id"]
         if playlist_id:
             try:
                 youtube_service.playlistItems().insert(
@@ -261,13 +264,13 @@ def upload_to_youtube(youtube_service, file_path, title, description=None,
                     }
                 ).execute()
                 logging.info("Added to playlist: %s", playlist_id)
-            except Exception as e:
-                logging.error("Failed to add to playlist: %s", e)
+            except HttpError as exc:
+                logging.error("Failed to add to playlist: %s", exc)
 
         return video_url
 
-    except Exception as e:
-        logging.error("YouTube upload failed: %s", e)
+    except (HttpError, OSError) as exc:
+        logging.error("YouTube upload failed: %s", exc)
         raise
 
 def move_to_drive(file_path, dest_folder):
@@ -303,21 +306,21 @@ class VideoHandler(FileSystemEventHandler):
 
         try:
             self._process_video(event.src_path)
-        except Exception as e:
-            logging.error("Failed to process video %s: %s", event.src_path, e)
+        except (OSError, HttpError, ValueError) as exc:
+            logging.error("Failed to process video %s: %s", event.src_path, exc)
         finally:
             self.processing_files.discard(event.src_path)
 
     def _create_youtube_title(self, filename):
         """Create a descriptive YouTube title from the filename.
-        
+
         Format: WoW Raid - [Raid Week] [Boss Name] Pull #X - [Date] [Time]
         Example: WoW Raid - W1 Fo Pull #1 - Sep 03 10:16 PM
         """
         try:
             # Remove file extension
             name = os.path.splitext(filename)[0]
-            
+
             # Split by underscores to get parts
             parts = name.split('_')
             if len(parts) >= 5:
@@ -326,25 +329,37 @@ class VideoHandler(FileSystemEventHandler):
                 pull_info = parts[2]  # Pull1
                 date_str = parts[3]   # Sep03
                 time_str = parts[4]   # 10-16PM
-                
+
                 # Format time for better readability
-                time_formatted = time_str.replace('-', ':').replace('PM', ' PM').replace('AM', ' AM')
-                
+                time_formatted = time_str.replace('-', ':').replace(
+                    'PM', ' PM').replace('AM', ' AM')
+
                 # Format date for better readability
-                date_formatted = date_str.replace('Sep', 'September').replace('Oct', 'October').replace('Nov', 'November').replace('Dec', 'December')
-                date_formatted = date_formatted.replace('Jan', 'January').replace('Feb', 'February').replace('Mar', 'March').replace('Apr', 'April')
-                date_formatted = date_formatted.replace('May', 'May').replace('Jun', 'June').replace('Jul', 'July').replace('Aug', 'August')
-                
+                date_formatted = date_str.replace('Sep', 'September').replace(
+                    'Oct', 'October').replace('Nov', 'November').replace(
+                    'Dec', 'December')
+                date_formatted = date_formatted.replace('Jan', 'January').replace(
+                    'Feb', 'February').replace('Mar', 'March').replace(
+                    'Apr', 'April')
+                date_formatted = date_formatted.replace('May', 'May').replace(
+                    'Jun', 'June').replace('Jul', 'July').replace(
+                    'Aug', 'August')
+
                 # Add day number
                 if len(date_formatted) > 3:
                     day_num = date_formatted[3:]
                     month_name = date_formatted[:3]
                     date_formatted = f"{month_name} {day_num}"
-                
-                return f"WoW Raid - {raid_week} {boss_name} {pull_info} - {date_formatted} {time_formatted}"
-        except Exception as e:
-            logging.warning(f"Could not create YouTube title from {filename}: {e}")
-        
+
+                return (
+                    "WoW Raid - %s %s %s - %s %s"
+                    % (raid_week, boss_name, pull_info, date_formatted, time_formatted)
+                )
+        except (IndexError, ValueError) as exc:
+            logging.warning(
+                "Could not create YouTube title from %s: %s", filename, exc
+            )
+
         # Fallback to original filename
         return filename
 
@@ -368,7 +383,7 @@ class VideoHandler(FileSystemEventHandler):
 
             # Create a more descriptive YouTube title
             youtube_title = self._create_youtube_title(new_name)
-            
+
             if DRY_RUN:
                 logging.info("Dry run enabled; skipping upload and Drive sync.")
             else:
@@ -377,10 +392,12 @@ class VideoHandler(FileSystemEventHandler):
                     self.youtube,
                     temp_path,
                     title=youtube_title,
-                    description=DEFAULT_DESCRIPTION,
-                    playlist_id=YOUTUBE_PLAYLIST_ID,
-                    tags=DEFAULT_TAGS,
-                    privacy_status=YOUTUBE_PRIVACY,
+                    upload_options={
+                        "description": DEFAULT_DESCRIPTION,
+                        "playlist_id": YOUTUBE_PLAYLIST_ID,
+                        "tags": DEFAULT_TAGS,
+                        "privacy_status": YOUTUBE_PRIVACY,
+                    },
                 )
 
                 # Copy to Drive folder (optional)
@@ -390,8 +407,8 @@ class VideoHandler(FileSystemEventHandler):
             if os.path.exists(backup_path):
                 os.remove(backup_path)
 
-        except Exception as e:
-            logging.error("Processing failed, restoring backup: %s", e)
+        except (OSError, HttpError, ValueError) as exc:
+            logging.error("Processing failed, restoring backup: %s", exc)
             # Restore original file if something went wrong
             if os.path.exists(backup_path):
                 shutil.move(backup_path, file_path)
@@ -425,8 +442,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logging.info("Shutting down...")
         observer.stop()
-    except Exception as e:
-        logging.error("Fatal error: %s", e)
+    except (OSError, HttpError, RuntimeError) as exc:
+        logging.error("Fatal error: %s", exc)
     finally:
         observer.join()
         logging.info("YouTube Uploader stopped.")
