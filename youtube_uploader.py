@@ -59,6 +59,7 @@ CONFIG_DEFAULTS = {
     "log_max_bytes": 5_000_000,
     "log_backup_count": 3,
     "uploaded_titles_path": "uploaded_titles.json",
+    "delete_after_upload": False,
 }
 
 WATCH_FOLDER = CONFIG_DEFAULTS["watch_folder"]
@@ -91,6 +92,7 @@ LOG_FILE = CONFIG_DEFAULTS["log_file"]
 LOG_MAX_BYTES = CONFIG_DEFAULTS["log_max_bytes"]
 LOG_BACKUP_COUNT = CONFIG_DEFAULTS["log_backup_count"]
 UPLOADED_TITLES_PATH = CONFIG_DEFAULTS["uploaded_titles_path"]
+DELETE_AFTER_UPLOAD = CONFIG_DEFAULTS["delete_after_upload"]
 
 # Setup logging
 def configure_logging():
@@ -169,6 +171,7 @@ def parse_args():
     parser.add_argument("--log-backup-count", type=int, help="Number of rotated log files to keep")
     parser.add_argument("--uploaded-titles-path", help="Path to uploaded titles cache JSON")
     parser.add_argument("--once", action="store_true", help="Process existing files and exit")
+    parser.add_argument("--delete-after-upload", action="store_true", help="Delete local file after successful upload")
     return parser.parse_args()
 
 def _validate_positive_int(value, name):
@@ -249,6 +252,7 @@ def apply_config(config, args):
     global LOG_MAX_BYTES
     global LOG_BACKUP_COUNT
     global UPLOADED_TITLES_PATH
+    global DELETE_AFTER_UPLOAD
 
     if args.watch_folder:
         config["watch_folder"] = args.watch_folder
@@ -304,6 +308,8 @@ def apply_config(config, args):
         config["log_backup_count"] = args.log_backup_count
     if args.uploaded_titles_path is not None:
         config["uploaded_titles_path"] = args.uploaded_titles_path
+    if args.delete_after_upload:
+        config["delete_after_upload"] = True
 
     WATCH_FOLDER = config["watch_folder"]
     DRIVE_SYNC_FOLDER = config["drive_sync_folder"]
@@ -335,6 +341,7 @@ def apply_config(config, args):
     LOG_MAX_BYTES = config["log_max_bytes"]
     LOG_BACKUP_COUNT = config["log_backup_count"]
     UPLOADED_TITLES_PATH = config["uploaded_titles_path"]
+    DELETE_AFTER_UPLOAD = config["delete_after_upload"]
     configure_logging()
 
 def authenticate_youtube():
@@ -774,6 +781,17 @@ def process_existing_files(handler):
         except (OSError, HttpError, ValueError) as exc:
             logging.error("Failed to process %s in --once mode: %s", path, exc)
 
+def log_summary(handler):
+    stats = handler.stats
+    logging.info(
+        "Summary | processed=%d | uploaded=%d | skipped=%d | queued=%d | failed=%d",
+        stats["processed"],
+        stats["uploaded"],
+        stats["skipped_duplicate"],
+        stats["queued"],
+        stats["failed"],
+    )
+
 class VideoHandler(FileSystemEventHandler):
     """File system event handler for video file monitoring."""
 
@@ -783,6 +801,13 @@ class VideoHandler(FileSystemEventHandler):
         self.processing_files = set()  # Track files being processed
         self.pull_tracker = load_pull_tracker(PULL_TRACKER_PATH)
         self.uploaded_titles = load_uploaded_titles(UPLOADED_TITLES_PATH)
+        self.stats = {
+            "processed": 0,
+            "uploaded": 0,
+            "skipped_duplicate": 0,
+            "queued": 0,
+            "failed": 0,
+        }
 
     def on_created(self, event):
         """Handle file creation events."""
@@ -883,6 +908,7 @@ class VideoHandler(FileSystemEventHandler):
     def _process_video(self, file_path):
         """Process a single video file with proper error handling."""
         logging.info("New file detected: %s", file_path)
+        self.stats["processed"] += 1
 
         wait_for_file_stable(file_path)
 
@@ -912,6 +938,7 @@ class VideoHandler(FileSystemEventHandler):
                 if youtube_title in self.uploaded_titles:
                     logging.info("Skipping duplicate title: %s", youtube_title)
                     move_to_drive(temp_path, DRIVE_SYNC_FOLDER)
+                    self.stats["skipped_duplicate"] += 1
                     return
                 upload_succeeded = False
                 # Upload to YouTube
@@ -936,6 +963,7 @@ class VideoHandler(FileSystemEventHandler):
                         "uploaded_at": datetime.datetime.now().isoformat(),
                     }
                     save_uploaded_titles(UPLOADED_TITLES_PATH, self.uploaded_titles)
+                    self.stats["uploaded"] += 1
                 except (HttpError, OSError) as exc:
                     logging.error("Upload failed, adding to pending queue: %s", exc)
                     pending = load_pending_uploads(PENDING_UPLOADS_PATH)
@@ -953,6 +981,7 @@ class VideoHandler(FileSystemEventHandler):
                         },
                     })
                     save_pending_uploads(PENDING_UPLOADS_PATH, pending)
+                    self.stats["queued"] += 1
                     raise PendingUploadQueued(str(exc))
                 finally:
                     if compressed and upload_succeeded and os.path.exists(upload_path):
@@ -960,6 +989,9 @@ class VideoHandler(FileSystemEventHandler):
 
                 # Copy to Drive folder (optional)
                 move_to_drive(temp_path, DRIVE_SYNC_FOLDER)
+                if DELETE_AFTER_UPLOAD and not DRIVE_SYNC_FOLDER and os.path.exists(temp_path):
+                    os.remove(temp_path)
+                    logging.info("Deleted local file after upload: %s", temp_path)
 
             # Clean up backup if everything succeeded
             if os.path.exists(backup_path):
@@ -972,6 +1004,7 @@ class VideoHandler(FileSystemEventHandler):
             raise
         except (OSError, HttpError, ValueError) as exc:
             logging.error("Processing failed, restoring backup: %s", exc)
+            self.stats["failed"] += 1
             # Restore original file if something went wrong
             if os.path.exists(backup_path):
                 shutil.move(backup_path, file_path)
@@ -1001,6 +1034,7 @@ if __name__ == "__main__":
         event_handler = VideoHandler(youtube)
         if args.once:
             process_existing_files(event_handler)
+            log_summary(event_handler)
             logging.info("Finished --once run.")
             sys.exit(0)
         observer = Observer()
@@ -1027,5 +1061,12 @@ if __name__ == "__main__":
     except (OSError, HttpError) as exc:
         logging.error("Fatal error: %s", exc)
     finally:
-        observer.join()
+        try:
+            log_summary(event_handler)
+        except NameError:
+            pass
+        try:
+            observer.join()
+        except NameError:
+            pass
         logging.info("YouTube Uploader stopped.")

@@ -12,6 +12,7 @@
   "ignore_extensions": [".tmp", ".part", ".crdownload"],
   "pull_tracker_path": "pull_tracker.json",
   "uploaded_titles_path": "uploaded_titles.json",
+  "delete_after_upload": false,
   "compression_enabled": false,
   "compression_preset": "medium",
   "compression_crf": 23,

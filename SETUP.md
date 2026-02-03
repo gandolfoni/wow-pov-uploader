@@ -75,6 +75,10 @@ python --version
    ```bash
    python youtube_uploader.py --once
    ```
+   - Delete local files after upload:
+   ```bash
+   python youtube_uploader.py --delete-after-upload
+   ```
 
 3. **Create Watch Folder**
    - Create the folder you specified in `WATCH_FOLDER`

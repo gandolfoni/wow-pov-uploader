@@ -163,6 +163,7 @@ python reset_pending_uploads.py
 | `log_max_bytes` | Max log size before rotation | `5000000` |
 | `log_backup_count` | Number of rotated logs to keep | `3` |
 | `uploaded_titles_path` | Uploaded title cache | `uploaded_titles.json` |
+| `delete_after_upload` | Delete local file after upload | `false` |
 
 ## File Naming
 
