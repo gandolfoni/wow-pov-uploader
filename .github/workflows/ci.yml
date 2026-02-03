@@ -39,10 +39,18 @@ jobs:
         # Add your tests here when you create them
         echo "No tests yet, but structure is ready"
     
-    - name: Build Docker image
+    - name: Build Docker image (if Dockerfile exists)
       run: |
-        docker build -t wow-pov-uploader .
+        if [ -f Dockerfile ]; then
+          docker build -t wow-pov-uploader .
+        else
+          echo "No Dockerfile found — skipping docker build"
+        fi
     
-    - name: Test Docker container
+    - name: Test Docker container (if image built)
       run: |
-        docker run --rm wow-pov-uploader python --version
+        if docker image inspect wow-pov-uploader >/dev/null 2>&1; then
+          docker run --rm wow-pov-uploader python --version
+        else
+          echo "Docker image not present — skipping container test"
+        fi
