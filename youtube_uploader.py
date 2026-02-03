@@ -6,6 +6,8 @@ import json
 import logging
 import shutil
 import sys
+import argparse
+import fnmatch
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -17,22 +19,47 @@ from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 
 # ---------- CONFIG ----------
-WATCH_FOLDER = r"C:\Path\To\WarcraftRecorder"
-DRIVE_SYNC_FOLDER = r"C:\Users\You\GoogleDrive\RaidVideos"  # Optional, leave empty if unused
-YOUTUBE_PLAYLIST_ID = None  # Set to a playlist ID if you want automatic sorting
-SEASON_START_DATE = "2024-09-01"  # Season start date for raid week calculation (YYYY-MM-DD)
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+CONFIG_DEFAULTS = {
+    "watch_folder": r"C:\Path\To\WarcraftRecorder",
+    "drive_sync_folder": r"C:\Users\You\GoogleDrive\RaidVideos",
+    "youtube_playlist_id": None,
+    "season_start_date": "2024-09-01",
+    "scopes": ["https://www.googleapis.com/auth/youtube.upload"],
+    "youtube_privacy": "unlisted",
+    "default_description": "Raid Upload",
+    "default_tags": ["World of Warcraft", "WoW", "Raid", "POV"],
+    "dry_run": False,
+    "stable_write_checks": 3,
+    "stable_write_interval_seconds": 2,
+    "min_file_age_seconds": 5,
+    "ignore_patterns": [
+        "*.tmp",
+        "*.part",
+        "*.partial",
+        "*.crdownload",
+        "*.download",
+    ],
+    "ignore_extensions": [".tmp", ".part", ".crdownload"],
+    "pull_tracker_path": "pull_tracker.json",
+    "log_level": "INFO",
+}
 
-# Upload behavior
-YOUTUBE_PRIVACY = "unlisted"  # unlisted, private, public
-DEFAULT_DESCRIPTION = "Raid Upload"
-DEFAULT_TAGS = ["World of Warcraft", "WoW", "Raid", "POV"]
-DRY_RUN = False  # Set True to skip uploads for testing
-
-# File handling behavior
-STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
-STABLE_WRITE_INTERVAL_SECONDS = 2
-PULL_TRACKER_PATH = "pull_tracker.json"
+WATCH_FOLDER = CONFIG_DEFAULTS["watch_folder"]
+DRIVE_SYNC_FOLDER = CONFIG_DEFAULTS["drive_sync_folder"]
+YOUTUBE_PLAYLIST_ID = CONFIG_DEFAULTS["youtube_playlist_id"]
+SEASON_START_DATE = CONFIG_DEFAULTS["season_start_date"]
+SCOPES = CONFIG_DEFAULTS["scopes"]
+YOUTUBE_PRIVACY = CONFIG_DEFAULTS["youtube_privacy"]
+DEFAULT_DESCRIPTION = CONFIG_DEFAULTS["default_description"]
+DEFAULT_TAGS = CONFIG_DEFAULTS["default_tags"]
+DRY_RUN = CONFIG_DEFAULTS["dry_run"]
+STABLE_WRITE_CHECKS = CONFIG_DEFAULTS["stable_write_checks"]
+STABLE_WRITE_INTERVAL_SECONDS = CONFIG_DEFAULTS["stable_write_interval_seconds"]
+MIN_FILE_AGE_SECONDS = CONFIG_DEFAULTS["min_file_age_seconds"]
+IGNORE_PATTERNS = CONFIG_DEFAULTS["ignore_patterns"]
+IGNORE_EXTENSIONS = CONFIG_DEFAULTS["ignore_extensions"]
+PULL_TRACKER_PATH = CONFIG_DEFAULTS["pull_tracker_path"]
+LOG_LEVEL = CONFIG_DEFAULTS["log_level"]
 
 # Setup logging
 logging.basicConfig(
@@ -44,6 +71,116 @@ logging.basicConfig(
     ]
 )
 # ----------------------------
+
+def _merge_config(defaults, overrides):
+    merged = dict(defaults)
+    if not overrides:
+        return merged
+    for key, value in overrides.items():
+        if key in merged:
+            merged[key] = value
+        else:
+            merged[key] = value
+    return merged
+
+def load_config(path):
+    if not path or not os.path.exists(path):
+        return dict(CONFIG_DEFAULTS)
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if not isinstance(data, dict):
+            logging.warning("Config file %s is not a JSON object. Using defaults.", path)
+            return dict(CONFIG_DEFAULTS)
+        return _merge_config(CONFIG_DEFAULTS, data)
+    except (OSError, json.JSONDecodeError) as exc:
+        logging.warning("Failed to load config %s: %s. Using defaults.", path, exc)
+        return dict(CONFIG_DEFAULTS)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="WoW POV YouTube uploader")
+    parser.add_argument("--config", default="config.json", help="Path to JSON config file")
+    parser.add_argument("--watch-folder", help="Folder to monitor for videos")
+    parser.add_argument("--drive-sync-folder", help="Google Drive sync folder (optional)")
+    parser.add_argument("--playlist-id", help="YouTube playlist ID")
+    parser.add_argument("--season-start-date", help="Season start date (YYYY-MM-DD)")
+    parser.add_argument("--privacy", choices=["unlisted", "private", "public"], help="YouTube privacy status")
+    parser.add_argument("--description", help="Default YouTube description")
+    parser.add_argument("--tags", help="Comma-separated tags")
+    parser.add_argument("--dry-run", action="store_true", help="Skip uploads and Drive sync")
+    parser.add_argument("--stable-write-checks", type=int, help="Stable size/mtime checks")
+    parser.add_argument("--stable-write-interval-seconds", type=int, help="Seconds between stability checks")
+    parser.add_argument("--min-file-age-seconds", type=int, help="Minimum file age before processing")
+    parser.add_argument("--ignore-patterns", help="Comma-separated ignore patterns (fnmatch)")
+    parser.add_argument("--ignore-extensions", help="Comma-separated ignore extensions (.tmp,.part)")
+    parser.add_argument("--log-level", help="Logging level (DEBUG, INFO, WARNING, ERROR)")
+    return parser.parse_args()
+
+def apply_config(config, args):
+    global WATCH_FOLDER
+    global DRIVE_SYNC_FOLDER
+    global YOUTUBE_PLAYLIST_ID
+    global SEASON_START_DATE
+    global SCOPES
+    global YOUTUBE_PRIVACY
+    global DEFAULT_DESCRIPTION
+    global DEFAULT_TAGS
+    global DRY_RUN
+    global STABLE_WRITE_CHECKS
+    global STABLE_WRITE_INTERVAL_SECONDS
+    global MIN_FILE_AGE_SECONDS
+    global IGNORE_PATTERNS
+    global IGNORE_EXTENSIONS
+    global PULL_TRACKER_PATH
+    global LOG_LEVEL
+
+    if args.watch_folder:
+        config["watch_folder"] = args.watch_folder
+    if args.drive_sync_folder is not None:
+        config["drive_sync_folder"] = args.drive_sync_folder
+    if args.playlist_id is not None:
+        config["youtube_playlist_id"] = args.playlist_id
+    if args.season_start_date:
+        config["season_start_date"] = args.season_start_date
+    if args.privacy:
+        config["youtube_privacy"] = args.privacy
+    if args.description is not None:
+        config["default_description"] = args.description
+    if args.tags is not None:
+        config["default_tags"] = [tag.strip() for tag in args.tags.split(",") if tag.strip()]
+    if args.dry_run:
+        config["dry_run"] = True
+    if args.stable_write_checks is not None:
+        config["stable_write_checks"] = args.stable_write_checks
+    if args.stable_write_interval_seconds is not None:
+        config["stable_write_interval_seconds"] = args.stable_write_interval_seconds
+    if args.min_file_age_seconds is not None:
+        config["min_file_age_seconds"] = args.min_file_age_seconds
+    if args.ignore_patterns is not None:
+        config["ignore_patterns"] = [p.strip() for p in args.ignore_patterns.split(",") if p.strip()]
+    if args.ignore_extensions is not None:
+        config["ignore_extensions"] = [e.strip() for e in args.ignore_extensions.split(",") if e.strip()]
+    if args.log_level is not None:
+        config["log_level"] = args.log_level
+
+    WATCH_FOLDER = config["watch_folder"]
+    DRIVE_SYNC_FOLDER = config["drive_sync_folder"]
+    YOUTUBE_PLAYLIST_ID = config["youtube_playlist_id"]
+    SEASON_START_DATE = config["season_start_date"]
+    SCOPES = config["scopes"]
+    YOUTUBE_PRIVACY = config["youtube_privacy"]
+    DEFAULT_DESCRIPTION = config["default_description"]
+    DEFAULT_TAGS = config["default_tags"]
+    DRY_RUN = config["dry_run"]
+    STABLE_WRITE_CHECKS = config["stable_write_checks"]
+    STABLE_WRITE_INTERVAL_SECONDS = config["stable_write_interval_seconds"]
+    MIN_FILE_AGE_SECONDS = config["min_file_age_seconds"]
+    IGNORE_PATTERNS = config["ignore_patterns"]
+    IGNORE_EXTENSIONS = config["ignore_extensions"]
+    PULL_TRACKER_PATH = config["pull_tracker_path"]
+    LOG_LEVEL = config["log_level"]
+
+    logging.getLogger().setLevel(LOG_LEVEL)
 
 def authenticate_youtube():
     creds = None
@@ -178,9 +315,10 @@ def make_nice_name(file_path, pull_tracker=None):
     return new_name
 
 def wait_for_file_stable(file_path):
-    """Wait until a file stops changing size for a few checks."""
+    """Wait until a file stops changing size/mtime for a few checks."""
     stable_checks = 0
     previous_size = -1
+    previous_mtime = -1
 
     while stable_checks < STABLE_WRITE_CHECKS:
         if not os.path.exists(file_path):
@@ -188,12 +326,34 @@ def wait_for_file_stable(file_path):
                 "File disappeared before processing: %s" % file_path
             )
         current_size = os.path.getsize(file_path)
-        if current_size == previous_size:
+        current_mtime = os.path.getmtime(file_path)
+        current_age = time.time() - current_mtime
+
+        is_stable = current_size == previous_size and current_mtime == previous_mtime
+        is_old_enough = current_age >= MIN_FILE_AGE_SECONDS
+
+        if is_stable and is_old_enough:
             stable_checks += 1
         else:
             stable_checks = 0
+
         previous_size = current_size
+        previous_mtime = current_mtime
         time.sleep(STABLE_WRITE_INTERVAL_SECONDS)
+
+def should_ignore_file(file_path):
+    filename = os.path.basename(file_path)
+    _, ext = os.path.splitext(filename)
+    lower_ext = ext.lower()
+
+    if lower_ext in [e.lower() for e in IGNORE_EXTENSIONS]:
+        return True
+
+    for pattern in IGNORE_PATTERNS:
+        if fnmatch.fnmatch(filename.lower(), pattern.lower()):
+            return True
+
+    return False
 
 def build_upload_request(title, description, tags, privacy_status):
     return {
@@ -294,7 +454,9 @@ class VideoHandler(FileSystemEventHandler):
         """Handle file creation events."""
         if event.is_directory:
             return
-        if not event.src_path.endswith(".mp4"):
+        if should_ignore_file(event.src_path):
+            return
+        if not event.src_path.lower().endswith(".mp4"):
             return
 
         # Avoid processing the same file multiple times
@@ -309,6 +471,28 @@ class VideoHandler(FileSystemEventHandler):
             logging.error("Failed to process video %s: %s", event.src_path, exc)
         finally:
             self.processing_files.discard(event.src_path)
+
+    def on_moved(self, event):
+        """Handle file move events (e.g., temp file renamed to final)."""
+        if event.is_directory:
+            return
+        dest_path = getattr(event, "dest_path", None)
+        if not dest_path:
+            return
+        if should_ignore_file(dest_path):
+            return
+        if not dest_path.lower().endswith(".mp4"):
+            return
+        if dest_path in self.processing_files:
+            return
+
+        self.processing_files.add(dest_path)
+        try:
+            self._process_video(dest_path)
+        except (OSError, HttpError, ValueError) as exc:
+            logging.error("Failed to process video %s: %s", dest_path, exc)
+        finally:
+            self.processing_files.discard(dest_path)
 
     def _create_youtube_title(self, filename):
         """Create a descriptive YouTube title from the filename.
@@ -415,6 +599,10 @@ class VideoHandler(FileSystemEventHandler):
 
 if __name__ == "__main__":
     try:
+        args = parse_args()
+        config = load_config(args.config)
+        apply_config(config, args)
+
         # Validate configuration
         if not os.path.exists(WATCH_FOLDER):
             logging.error("Watch folder does not exist: %s", WATCH_FOLDER)

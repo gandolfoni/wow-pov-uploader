@@ -67,20 +67,31 @@ pip install -r requirements.txt
 
 ### 2. Configuration
 
-Edit the configuration section in `youtube_uploader.py`:
+Create a `config.json` in the project root:
 
-```python
-# ---------- CONFIG ----------
-WATCH_FOLDER = r"C:\Path\To\WarcraftRecorder"  # Folder to monitor for videos
-DRIVE_SYNC_FOLDER = r"C:\Users\You\GoogleDrive\RaidVideos"  # Optional Google Drive sync
-YOUTUBE_PRIVACY = "unlisted"  # unlisted, private, public
-DEFAULT_DESCRIPTION = "Raid Upload"
-DEFAULT_TAGS = ["World of Warcraft", "WoW", "Raid", "POV"]
-DRY_RUN = False  # Skip uploads for testing
-YOUTUBE_PLAYLIST_ID = None  # Set to playlist ID for automatic sorting
-STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
-STABLE_WRITE_INTERVAL_SECONDS = 2
-PULL_TRACKER_PATH = "pull_tracker.json"
+```json
+{
+  "watch_folder": "C:\\Path\\To\\WarcraftRecorder",
+  "drive_sync_folder": "C:\\Users\\You\\GoogleDrive\\RaidVideos",
+  "youtube_privacy": "unlisted",
+  "default_description": "Raid Upload",
+  "default_tags": ["World of Warcraft", "WoW", "Raid", "POV"],
+  "dry_run": false,
+  "youtube_playlist_id": null,
+  "stable_write_checks": 3,
+  "stable_write_interval_seconds": 2,
+  "min_file_age_seconds": 5,
+  "ignore_patterns": ["*.tmp", "*.part", "*.crdownload"],
+  "ignore_extensions": [".tmp", ".part", ".crdownload"],
+  "pull_tracker_path": "pull_tracker.json",
+  "log_level": "INFO"
+}
+```
+
+You can override config values on the CLI:
+
+```bash
+python youtube_uploader.py --watch-folder "C:\Path\To\WarcraftRecorder" --dry-run
 ```
 
 ### 3. First Run
@@ -113,16 +124,20 @@ python youtube_uploader.py
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `WATCH_FOLDER` | Folder to monitor for new videos | Required |
-| `DRIVE_SYNC_FOLDER` | Google Drive folder for sync (optional) | None |
-| `YOUTUBE_PLAYLIST_ID` | YouTube playlist ID for auto-sorting | None |
-| `YOUTUBE_PRIVACY` | Upload privacy setting | `unlisted` |
-| `DEFAULT_DESCRIPTION` | Default YouTube description | `Raid Upload` |
-| `DEFAULT_TAGS` | Default YouTube tags | `["World of Warcraft", "WoW", "Raid", "POV"]` |
-| `DRY_RUN` | Skip uploads and Drive sync for testing | `False` |
-| `STABLE_WRITE_CHECKS` | File stability checks before processing | `3` |
-| `STABLE_WRITE_INTERVAL_SECONDS` | Seconds between stability checks | `2` |
-| `PULL_TRACKER_PATH` | Persisted pull counter file path | `pull_tracker.json` |
+| `watch_folder` | Folder to monitor for new videos | Required |
+| `drive_sync_folder` | Google Drive folder for sync (optional) | None |
+| `youtube_playlist_id` | YouTube playlist ID for auto-sorting | None |
+| `youtube_privacy` | Upload privacy setting | `unlisted` |
+| `default_description` | Default YouTube description | `Raid Upload` |
+| `default_tags` | Default YouTube tags | `["World of Warcraft", "WoW", "Raid", "POV"]` |
+| `dry_run` | Skip uploads and Drive sync for testing | `false` |
+| `stable_write_checks` | File stability checks before processing | `3` |
+| `stable_write_interval_seconds` | Seconds between stability checks | `2` |
+| `min_file_age_seconds` | Minimum age before processing | `5` |
+| `ignore_patterns` | Patterns to ignore | `*.tmp, *.part, *.crdownload` |
+| `ignore_extensions` | Extensions to ignore | `.tmp, .part, .crdownload` |
+| `pull_tracker_path` | Persisted pull counter file path | `pull_tracker.json` |
+| `log_level` | Logging level | `INFO` |
 
 ## File Naming
 

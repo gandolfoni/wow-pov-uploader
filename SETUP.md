@@ -48,20 +48,31 @@ python --version
    pip install -r requirements.txt
    ```
 
-2. **Configure the Script**
-   - Open `youtube_uploader.py` in a text editor
-   - Update the configuration section:
-   ```python
-   WATCH_FOLDER = r"C:\Path\To\Your\WarcraftRecorder"  # Change this path
-   DRIVE_SYNC_FOLDER = r"C:\Users\YourName\GoogleDrive\RaidVideos"  # Optional
-   YOUTUBE_PRIVACY = "unlisted"  # unlisted, private, public
-   DEFAULT_DESCRIPTION = "Raid Upload"
-   DEFAULT_TAGS = ["World of Warcraft", "WoW", "Raid", "POV"]
-   DRY_RUN = False  # Skip uploads for testing
-   YOUTUBE_PLAYLIST_ID = None  # Add playlist ID if you want auto-sorting
-   STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
-   STABLE_WRITE_INTERVAL_SECONDS = 2
-   PULL_TRACKER_PATH = "pull_tracker.json"
+2. **Configure via `config.json` (Recommended)**
+   - Create a `config.json` in the project folder:
+   ```json
+   {
+     "watch_folder": "C:\\Path\\To\\Your\\WarcraftRecorder",
+     "drive_sync_folder": "C:\\Users\\YourName\\GoogleDrive\\RaidVideos",
+     "youtube_privacy": "unlisted",
+     "default_description": "Raid Upload",
+     "default_tags": ["World of Warcraft", "WoW", "Raid", "POV"],
+     "dry_run": false,
+     "youtube_playlist_id": null,
+     "stable_write_checks": 3,
+     "stable_write_interval_seconds": 2,
+     "min_file_age_seconds": 5,
+     "ignore_patterns": ["*.tmp", "*.part", "*.crdownload"],
+     "ignore_extensions": [".tmp", ".part", ".crdownload"],
+     "pull_tracker_path": "pull_tracker.json",
+     "log_level": "INFO"
+   }
+   ```
+
+3. **CLI Overrides (Optional)**
+   - You can override any config values at runtime:
+   ```bash
+   python youtube_uploader.py --watch-folder "C:\Path\To\Your\WarcraftRecorder" --dry-run
    ```
 
 3. **Create Watch Folder**
@@ -93,6 +104,8 @@ python --version
 2. Create a new playlist (e.g., "WoW Raid Videos")
 3. Copy the playlist ID from the URL
 4. Update `YOUTUBE_PLAYLIST_ID` in the script
+   - Or set `youtube_playlist_id` in `config.json`
+   - Or pass `--playlist-id` on the CLI
 
 ### Google Drive Sync
 1. Install Google Drive desktop app
