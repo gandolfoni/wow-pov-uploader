@@ -1,6 +1,6 @@
 # WoW POV Uploader
 
-An automated YouTube uploader for World of Warcraft POV (Point of View) videos. This script monitors a folder for new video files and automatically uploads them to YouTube with compression and proper naming conventions.
+An automated YouTube uploader for World of Warcraft POV (Point of View) videos. This script monitors a folder for new video files and automatically uploads them to YouTube with proper naming conventions.
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/gandolfoni/wow-pov-uploader)
 
@@ -18,7 +18,6 @@ An automated YouTube uploader for World of Warcraft POV (Point of View) videos. 
 ## Features
 
 - 🎮 **Automated Upload**: Monitors a folder for new MP4 files and uploads them automatically
-- 📹 **Video Compression**: Uses FFmpeg to compress videos for optimal upload size
 - 🏷️ **Smart Naming**: Automatically generates descriptive filenames with timestamps
 - 📁 **Google Drive Sync**: Optional integration to sync videos to Google Drive
 - 🎵 **Playlist Support**: Automatically adds videos to specified YouTube playlists
@@ -40,7 +39,6 @@ An automated YouTube uploader for World of Warcraft POV (Point of View) videos. 
 ## Prerequisites
 
 - Python 3.7 or higher
-- FFmpeg installed and in your system PATH
 - Google Cloud Console project with YouTube Data API v3 enabled
 - YouTube channel for uploading videos
 
@@ -56,11 +54,6 @@ cd wow-pov-uploader
 ```bash
 pip install -r requirements.txt
 ```
-
-3. Install FFmpeg:
-   - **Windows**: Download from [FFmpeg.org](https://ffmpeg.org/download.html) or use `winget install ffmpeg`
-   - **macOS**: `brew install ffmpeg`
-   - **Linux**: `sudo apt install ffmpeg` (Ubuntu/Debian)
 
 ## Setup
 
@@ -88,11 +81,6 @@ YOUTUBE_PLAYLIST_ID = None  # Set to playlist ID for automatic sorting
 STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
 STABLE_WRITE_INTERVAL_SECONDS = 2
 PULL_TRACKER_PATH = "pull_tracker.json"
-ENABLE_COMPRESSION = False
-FFMPEG_CRF = 23
-FFMPEG_SCALE = "1920:-2"  # Use None to keep original resolution
-FFMPEG_AUDIO_BITRATE = "128k"
-FFMPEG_PRESET = "medium"
 ```
 
 ### 3. First Run
@@ -117,7 +105,6 @@ python youtube_uploader.py
 2. The script will monitor the configured folder for new MP4 files
 3. When a new video is detected:
    - File is backed up
-   - Video is compressed (if enabled)
    - Video is uploaded to YouTube as "unlisted"
    - Video is optionally synced to Google Drive
    - Original backup is removed after successful upload
@@ -136,21 +123,6 @@ python youtube_uploader.py
 | `STABLE_WRITE_CHECKS` | File stability checks before processing | `3` |
 | `STABLE_WRITE_INTERVAL_SECONDS` | Seconds between stability checks | `2` |
 | `PULL_TRACKER_PATH` | Persisted pull counter file path | `pull_tracker.json` |
-| `ENABLE_COMPRESSION` | Toggle FFmpeg compression | `False` |
-| `FFMPEG_CRF` | CRF value for H.264 encoding | `23` |
-| `FFMPEG_SCALE` | Scale filter (e.g., `"1920:-2"`) | `"1920:-2"` |
-| `FFMPEG_AUDIO_BITRATE` | Audio bitrate for AAC | `"128k"` |
-| `FFMPEG_PRESET` | FFmpeg preset | `"medium"` |
-
-## Video Compression
-
-Compression is optional. YouTube will re-encode uploads, so you can disable compression and upload originals.
-If you enable compression, the script uses FFmpeg with configurable settings for gaming content:
-- Video codec: H.264 (libx264)
-- Quality: CRF (default 23) for a balance of quality/size
-- Resolution: Scales with `FFMPEG_SCALE` if set
-- Audio: AAC bitrate (default 128kbps)
-- Optimized for web streaming via `+faststart`
 
 ## File Naming
 
@@ -171,11 +143,7 @@ The script creates detailed logs in `youtube_uploader.log` including:
 
 ### Common Issues
 
-1. **"FFmpeg not found"**
-   - Ensure FFmpeg is installed and in your system PATH
-   - Test with: `ffmpeg -version`
-
-2. **"credentials.json not found"**
+1. **"credentials.json not found"**
    - Download OAuth credentials from Google Cloud Console
    - Save as `credentials.json` in the project directory
 

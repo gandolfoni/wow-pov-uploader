@@ -5,7 +5,6 @@ import datetime
 import json
 import logging
 import shutil
-import subprocess
 import sys
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -34,11 +33,6 @@ DRY_RUN = False  # Set True to skip uploads for testing
 STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
 STABLE_WRITE_INTERVAL_SECONDS = 2
 PULL_TRACKER_PATH = "pull_tracker.json"
-ENABLE_COMPRESSION = False
-FFMPEG_CRF = 23
-FFMPEG_SCALE = "1920:-2"  # Use None to keep original resolution
-FFMPEG_AUDIO_BITRATE = "128k"
-FFMPEG_PRESET = "medium"
 
 # Setup logging
 logging.basicConfig(
@@ -214,67 +208,6 @@ def build_upload_request(title, description, tags, privacy_status):
         }
     }
 
-def compress_with_ffmpeg(
-    input_path,
-    crf=FFMPEG_CRF,
-    scale=FFMPEG_SCALE,
-    audio_bitrate=FFMPEG_AUDIO_BITRATE,
-    preset=FFMPEG_PRESET,
-):
-    """Compress a video with FFmpeg and return the new file path."""
-    if not os.path.exists(input_path):
-        raise FileNotFoundError("Video file not found for compression: %s" % input_path)
-
-    base, ext = os.path.splitext(input_path)
-    output_path = f"{base}_compressed{ext}"
-
-    command = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        input_path,
-        "-c:v",
-        "libx264",
-        "-preset",
-        preset,
-        "-crf",
-        str(crf),
-    ]
-
-    if scale:
-        command.extend(["-vf", f"scale={scale}"])
-
-    command.extend(
-        [
-            "-c:a",
-            "aac",
-            "-b:a",
-            audio_bitrate,
-            "-movflags",
-            "+faststart",
-            output_path,
-        ]
-    )
-
-    logging.info("Compressing video with FFmpeg: %s", " ".join(command))
-    try:
-        subprocess.run(
-            command,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        logging.error("FFmpeg compression failed: %s", exc)
-        raise RuntimeError("FFmpeg compression failed") from exc
-
-    if not os.path.exists(output_path):
-        raise RuntimeError("FFmpeg did not produce output file: %s" % output_path)
-
-    return output_path
-
-
 def upload_to_youtube(youtube_service, file_path, title, upload_options):
     """Upload video to YouTube with error handling and progress tracking."""
     try:
@@ -372,7 +305,7 @@ class VideoHandler(FileSystemEventHandler):
 
         try:
             self._process_video(event.src_path)
-        except (OSError, HttpError, ValueError, RuntimeError) as exc:
+        except (OSError, HttpError, ValueError) as exc:
             logging.error("Failed to process video %s: %s", event.src_path, exc)
         finally:
             self.processing_files.discard(event.src_path)
@@ -450,12 +383,6 @@ class VideoHandler(FileSystemEventHandler):
             # Create a more descriptive YouTube title
             youtube_title = self._create_youtube_title(new_name)
 
-            if ENABLE_COMPRESSION:
-                compressed_path = compress_with_ffmpeg(temp_path)
-                if compressed_path != temp_path:
-                    os.remove(temp_path)
-                    temp_path = compressed_path
-
             if DRY_RUN:
                 logging.info("Dry run enabled; skipping upload and Drive sync.")
             else:
@@ -479,7 +406,7 @@ class VideoHandler(FileSystemEventHandler):
             if os.path.exists(backup_path):
                 os.remove(backup_path)
 
-        except (OSError, HttpError, ValueError, RuntimeError) as exc:
+        except (OSError, HttpError, ValueError) as exc:
             logging.error("Processing failed, restoring backup: %s", exc)
             # Restore original file if something went wrong
             if os.path.exists(backup_path):
@@ -514,7 +441,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logging.info("Shutting down...")
         observer.stop()
-    except (OSError, HttpError, RuntimeError) as exc:
+    except (OSError, HttpError) as exc:
         logging.error("Fatal error: %s", exc)
     finally:
         observer.join()

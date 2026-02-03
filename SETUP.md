@@ -8,19 +8,9 @@ This guide will walk you through setting up the WoW POV Uploader for the first t
 - Download Python 3.7+ from [python.org](https://www.python.org/downloads/)
 - During installation, check "Add Python to PATH"
 
-### Install FFmpeg
-- **Windows**: 
-  - Download from [FFmpeg.org](https://ffmpeg.org/download.html)
-  - Extract to `C:\ffmpeg`
-  - Add `C:\ffmpeg\bin` to your system PATH
-  - Or use: `winget install ffmpeg`
-- **macOS**: `brew install ffmpeg`
-- **Linux**: `sudo apt install ffmpeg`
-
 ### Verify Installations
 ```bash
 python --version
-ffmpeg -version
 ```
 
 ## Step 2: Google Cloud Console Setup
@@ -72,11 +62,6 @@ ffmpeg -version
    STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
    STABLE_WRITE_INTERVAL_SECONDS = 2
    PULL_TRACKER_PATH = "pull_tracker.json"
-   ENABLE_COMPRESSION = False
-   FFMPEG_CRF = 23
-   FFMPEG_SCALE = "1920:-2"  # Use None to keep original resolution
-   FFMPEG_AUDIO_BITRATE = "128k"
-   FFMPEG_PRESET = "medium"
    ```
 
 3. **Create Watch Folder**
@@ -114,24 +99,9 @@ ffmpeg -version
 2. Create a folder for your videos
 3. Update `DRIVE_SYNC_FOLDER` path in the script
 
-### Video Compression Settings
-Compression is optional. YouTube will re-encode uploads, so you can disable compression and upload originals.
-If you enable it, the script uses these FFmpeg settings by default:
-- Resolution: scale filter `1920:-2` (set `FFMPEG_SCALE = None` to keep original size)
-- Video codec: H.264 (libx264)
-- Quality: CRF 23 (good balance)
-- Audio: AAC 128kbps
-- Preset: medium
-
-To modify, edit the `compress_with_ffmpeg()` function.
-
 ## Troubleshooting
 
 ### Common Issues
-
-**"FFmpeg not found"**
-- Ensure FFmpeg is in your system PATH
-- Test with: `ffmpeg -version`
 
 **"credentials.json not found"**
 - Download OAuth credentials from Google Cloud Console
