@@ -131,6 +131,12 @@ python youtube_uploader.py
 python reset_pending_uploads.py
 ```
 
+## Quick Sanity Check
+
+1. Run `python youtube_uploader.py --once --dry-run` and confirm it exits cleanly.
+2. Drop a `.tmp` file in the watch folder and confirm it is ignored.
+3. Enable compression and confirm “Compressing via ffmpeg…” appears for a test file.
+
 ## Configuration Options
 
 | Option | Description | Default |
