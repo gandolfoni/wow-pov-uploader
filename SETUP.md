@@ -8,19 +8,9 @@ This guide will walk you through setting up the WoW POV Uploader for the first t
 - Download Python 3.7+ from [python.org](https://www.python.org/downloads/)
 - During installation, check "Add Python to PATH"
 
-### Install FFmpeg
-- **Windows**: 
-  - Download from [FFmpeg.org](https://ffmpeg.org/download.html)
-  - Extract to `C:\ffmpeg`
-  - Add `C:\ffmpeg\bin` to your system PATH
-  - Or use: `winget install ffmpeg`
-- **macOS**: `brew install ffmpeg`
-- **Linux**: `sudo apt install ffmpeg`
-
 ### Verify Installations
 ```bash
 python --version
-ffmpeg -version
 ```
 
 ## Step 2: Google Cloud Console Setup
@@ -109,22 +99,9 @@ ffmpeg -version
 2. Create a folder for your videos
 3. Update `DRIVE_SYNC_FOLDER` path in the script
 
-### Video Compression Settings
-The script uses these FFmpeg settings by default:
-- Resolution: 1920x1080 (scales if needed)
-- Video codec: H.264
-- Quality: CRF 23 (good balance)
-- Audio: AAC 128kbps
-
-To modify, edit the `compress_with_ffmpeg()` function.
-
 ## Troubleshooting
 
 ### Common Issues
-
-**"FFmpeg not found"**
-- Ensure FFmpeg is in your system PATH
-- Test with: `ffmpeg -version`
 
 **"credentials.json not found"**
 - Download OAuth credentials from Google Cloud Console

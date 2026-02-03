@@ -208,7 +208,6 @@ def build_upload_request(title, description, tags, privacy_status):
         }
     }
 
-
 def upload_to_youtube(youtube_service, file_path, title, upload_options):
     """Upload video to YouTube with error handling and progress tracking."""
     try:
@@ -442,7 +441,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logging.info("Shutting down...")
         observer.stop()
-    except (OSError, HttpError, RuntimeError) as exc:
+    except (OSError, HttpError) as exc:
         logging.error("Fatal error: %s", exc)
     finally:
         observer.join()
