@@ -2,6 +2,7 @@
 import os
 import time
 import datetime
+import json
 import logging
 import shutil
 import sys
@@ -20,6 +21,17 @@ DRIVE_SYNC_FOLDER = r"C:\Users\You\GoogleDrive\RaidVideos"  # Optional, leave em
 YOUTUBE_PLAYLIST_ID = None  # Set to a playlist ID if you want automatic sorting
 SEASON_START_DATE = "2024-09-01"  # Season start date for raid week calculation (YYYY-MM-DD)
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+
+# Upload behavior
+YOUTUBE_PRIVACY = "unlisted"  # unlisted, private, public
+DEFAULT_DESCRIPTION = "Raid Upload"
+DEFAULT_TAGS = ["World of Warcraft", "WoW", "Raid", "POV"]
+DRY_RUN = False  # Set True to skip uploads for testing
+
+# File handling behavior
+STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
+STABLE_WRITE_INTERVAL_SECONDS = 2
+PULL_TRACKER_PATH = "pull_tracker.json"
 
 # Setup logging
 logging.basicConfig(
@@ -75,6 +87,23 @@ def extract_context_from_filename(filename):
     
     # Fallback to current time and generic context
     return datetime.datetime.now(), "Unknown"
+
+def load_pull_tracker(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (json.JSONDecodeError, OSError) as exc:
+        logging.warning("Failed to load pull tracker from %s: %s", path, exc)
+        return {}
+
+def save_pull_tracker(path, tracker):
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(tracker, handle, indent=2, sort_keys=True)
+    except OSError as exc:
+        logging.warning("Failed to save pull tracker to %s: %s", path, exc)
 
 def get_raid_week(start_date=None):
     """Calculate raid week number from season start date.
@@ -148,9 +177,25 @@ def make_nice_name(file_path, pull_tracker=None):
     logging.info(f"Renamed: {filename} -> {new_name}")
     return new_name
 
+def wait_for_file_stable(file_path):
+    """Wait until a file stops changing size for a few checks."""
+    stable_checks = 0
+    previous_size = -1
 
-def upload_to_youtube(youtube_service, file_path, title, description="Raid Upload",
-                     playlist_id=None):
+    while stable_checks < STABLE_WRITE_CHECKS:
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File disappeared before processing: {file_path}")
+        current_size = os.path.getsize(file_path)
+        if current_size == previous_size:
+            stable_checks += 1
+        else:
+            stable_checks = 0
+        previous_size = current_size
+        time.sleep(STABLE_WRITE_INTERVAL_SECONDS)
+
+
+def upload_to_youtube(youtube_service, file_path, title, description=None,
+                     playlist_id=None, tags=None, privacy_status=None):
     """Upload video to YouTube with error handling and progress tracking."""
     try:
         logging.info("Starting upload: %s", title)
@@ -162,14 +207,22 @@ def upload_to_youtube(youtube_service, file_path, title, description="Raid Uploa
         file_size = os.path.getsize(file_path)
         logging.info("File size: %.1f MB", file_size / (1024*1024))
 
+        if description is None:
+            description = DEFAULT_DESCRIPTION
+        if tags is None:
+            tags = DEFAULT_TAGS
+        if privacy_status is None:
+            privacy_status = YOUTUBE_PRIVACY
+
         request_body = {
             "snippet": {
                 "title": title,
                 "description": description,
-                "categoryId": "20"  # Gaming
+                "categoryId": "20",  # Gaming
+                "tags": tags
             },
             "status": {
-                "privacyStatus": "unlisted"
+                "privacyStatus": privacy_status
             }
         }
 
@@ -224,7 +277,7 @@ def move_to_drive(file_path, dest_folder):
     os.makedirs(dest_folder, exist_ok=True)
     new_path = os.path.join(dest_folder, os.path.basename(file_path))
     os.rename(file_path, new_path)
-    print(f"Copied to Drive sync folder: {new_path}")
+    logging.info("Copied to Drive sync folder: %s", new_path)
 
 class VideoHandler(FileSystemEventHandler):
     """File system event handler for video file monitoring."""
@@ -233,7 +286,7 @@ class VideoHandler(FileSystemEventHandler):
         """Initialize the video handler with YouTube service."""
         self.youtube = youtube_service
         self.processing_files = set()  # Track files being processed
-        self.pull_tracker = {}  # Track pull counts per boss per day
+        self.pull_tracker = load_pull_tracker(PULL_TRACKER_PATH)
 
     def on_created(self, event):
         """Handle file creation events."""
@@ -299,17 +352,10 @@ class VideoHandler(FileSystemEventHandler):
         """Process a single video file with proper error handling."""
         logging.info("New file detected: %s", file_path)
 
-        # Wait a bit to ensure file is fully written
-        time.sleep(2)
-
-        # Check if file is still being written to
-        initial_size = os.path.getsize(file_path)
-        time.sleep(1)
-        if os.path.getsize(file_path) != initial_size:
-            logging.info("File still being written, waiting...")
-            time.sleep(5)
+        wait_for_file_stable(file_path)
 
         new_name = make_nice_name(file_path, self.pull_tracker)
+        save_pull_tracker(PULL_TRACKER_PATH, self.pull_tracker)
         temp_path = os.path.join(WATCH_FOLDER, new_name)
 
         # Create backup of original file
@@ -323,12 +369,22 @@ class VideoHandler(FileSystemEventHandler):
             # Create a more descriptive YouTube title
             youtube_title = self._create_youtube_title(new_name)
             
-            # Upload to YouTube
-            upload_to_youtube(self.youtube, temp_path, title=youtube_title,
-                             playlist_id=YOUTUBE_PLAYLIST_ID)
+            if DRY_RUN:
+                logging.info("Dry run enabled; skipping upload and Drive sync.")
+            else:
+                # Upload to YouTube
+                upload_to_youtube(
+                    self.youtube,
+                    temp_path,
+                    title=youtube_title,
+                    description=DEFAULT_DESCRIPTION,
+                    playlist_id=YOUTUBE_PLAYLIST_ID,
+                    tags=DEFAULT_TAGS,
+                    privacy_status=YOUTUBE_PRIVACY,
+                )
 
-            # Copy to Drive folder (optional)
-            move_to_drive(temp_path, DRIVE_SYNC_FOLDER)
+                # Copy to Drive folder (optional)
+                move_to_drive(temp_path, DRIVE_SYNC_FOLDER)
 
             # Clean up backup if everything succeeded
             if os.path.exists(backup_path):

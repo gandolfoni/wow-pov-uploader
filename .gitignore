@@ -47,6 +47,7 @@ Thumbs.db
 # Project specific
 credentials.json
 token.json
+pull_tracker.json
 youtube_uploader.log
 *.backup
 *.log
