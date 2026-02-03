@@ -72,6 +72,11 @@ ffmpeg -version
    STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
    STABLE_WRITE_INTERVAL_SECONDS = 2
    PULL_TRACKER_PATH = "pull_tracker.json"
+   ENABLE_COMPRESSION = False
+   FFMPEG_CRF = 23
+   FFMPEG_SCALE = "1920:-2"  # Use None to keep original resolution
+   FFMPEG_AUDIO_BITRATE = "128k"
+   FFMPEG_PRESET = "medium"
    ```
 
 3. **Create Watch Folder**
@@ -110,11 +115,13 @@ ffmpeg -version
 3. Update `DRIVE_SYNC_FOLDER` path in the script
 
 ### Video Compression Settings
-The script uses these FFmpeg settings by default:
-- Resolution: 1920x1080 (scales if needed)
-- Video codec: H.264
+Compression is optional. YouTube will re-encode uploads, so you can disable compression and upload originals.
+If you enable it, the script uses these FFmpeg settings by default:
+- Resolution: scale filter `1920:-2` (set `FFMPEG_SCALE = None` to keep original size)
+- Video codec: H.264 (libx264)
 - Quality: CRF 23 (good balance)
 - Audio: AAC 128kbps
+- Preset: medium
 
 To modify, edit the `compress_with_ffmpeg()` function.
 

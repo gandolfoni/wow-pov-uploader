@@ -88,6 +88,11 @@ YOUTUBE_PLAYLIST_ID = None  # Set to playlist ID for automatic sorting
 STABLE_WRITE_CHECKS = 3  # Number of consecutive stable checks before processing
 STABLE_WRITE_INTERVAL_SECONDS = 2
 PULL_TRACKER_PATH = "pull_tracker.json"
+ENABLE_COMPRESSION = False
+FFMPEG_CRF = 23
+FFMPEG_SCALE = "1920:-2"  # Use None to keep original resolution
+FFMPEG_AUDIO_BITRATE = "128k"
+FFMPEG_PRESET = "medium"
 ```
 
 ### 3. First Run
@@ -131,15 +136,21 @@ python youtube_uploader.py
 | `STABLE_WRITE_CHECKS` | File stability checks before processing | `3` |
 | `STABLE_WRITE_INTERVAL_SECONDS` | Seconds between stability checks | `2` |
 | `PULL_TRACKER_PATH` | Persisted pull counter file path | `pull_tracker.json` |
+| `ENABLE_COMPRESSION` | Toggle FFmpeg compression | `False` |
+| `FFMPEG_CRF` | CRF value for H.264 encoding | `23` |
+| `FFMPEG_SCALE` | Scale filter (e.g., `"1920:-2"`) | `"1920:-2"` |
+| `FFMPEG_AUDIO_BITRATE` | Audio bitrate for AAC | `"128k"` |
+| `FFMPEG_PRESET` | FFmpeg preset | `"medium"` |
 
 ## Video Compression
 
-The script uses FFmpeg with optimized settings for gaming content:
+Compression is optional. YouTube will re-encode uploads, so you can disable compression and upload originals.
+If you enable compression, the script uses FFmpeg with configurable settings for gaming content:
 - Video codec: H.264 (libx264)
-- Quality: CRF 23 (good balance of quality/size)
-- Resolution: Scales to 1080p if needed
-- Audio: AAC 128kbps
-- Optimized for web streaming
+- Quality: CRF (default 23) for a balance of quality/size
+- Resolution: Scales with `FFMPEG_SCALE` if set
+- Audio: AAC bitrate (default 128kbps)
+- Optimized for web streaming via `+faststart`
 
 ## File Naming
 
