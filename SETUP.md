@@ -79,6 +79,10 @@ python --version
    ```bash
    python youtube_uploader.py --delete-after-upload
    ```
+   - Copy instead of move to Drive sync:
+   ```bash
+   python youtube_uploader.py --drive-sync-mode copy
+   ```
 
 3. **Create Watch Folder**
    - Create the folder you specified in `WATCH_FOLDER`

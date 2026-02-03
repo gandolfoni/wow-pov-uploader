@@ -164,6 +164,9 @@ python reset_pending_uploads.py
 | `log_backup_count` | Number of rotated logs to keep | `3` |
 | `uploaded_titles_path` | Uploaded title cache | `uploaded_titles.json` |
 | `delete_after_upload` | Delete local file after upload | `false` |
+| `drive_sync_mode` | Drive sync `move` or `copy` | `move` |
+| `duplicate_guard_mode` | Duplicate guard `title`, `hash`, `none` | `title` |
+| `compression_keep_original` | Keep original if compression used | `true` |
 
 ## File Naming
 

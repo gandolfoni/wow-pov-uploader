@@ -11,6 +11,7 @@ import argparse
 import fnmatch
 import subprocess
 import random
+import hashlib
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -60,6 +61,9 @@ CONFIG_DEFAULTS = {
     "log_backup_count": 3,
     "uploaded_titles_path": "uploaded_titles.json",
     "delete_after_upload": False,
+    "drive_sync_mode": "move",
+    "duplicate_guard_mode": "title",
+    "compression_keep_original": True,
 }
 
 WATCH_FOLDER = CONFIG_DEFAULTS["watch_folder"]
@@ -93,6 +97,9 @@ LOG_MAX_BYTES = CONFIG_DEFAULTS["log_max_bytes"]
 LOG_BACKUP_COUNT = CONFIG_DEFAULTS["log_backup_count"]
 UPLOADED_TITLES_PATH = CONFIG_DEFAULTS["uploaded_titles_path"]
 DELETE_AFTER_UPLOAD = CONFIG_DEFAULTS["delete_after_upload"]
+DRIVE_SYNC_MODE = CONFIG_DEFAULTS["drive_sync_mode"]
+DUPLICATE_GUARD_MODE = CONFIG_DEFAULTS["duplicate_guard_mode"]
+COMPRESSION_KEEP_ORIGINAL = CONFIG_DEFAULTS["compression_keep_original"]
 
 # Setup logging
 def configure_logging():
@@ -172,6 +179,10 @@ def parse_args():
     parser.add_argument("--uploaded-titles-path", help="Path to uploaded titles cache JSON")
     parser.add_argument("--once", action="store_true", help="Process existing files and exit")
     parser.add_argument("--delete-after-upload", action="store_true", help="Delete local file after successful upload")
+    parser.add_argument("--drive-sync-mode", choices=["move", "copy"], help="Drive sync mode")
+    parser.add_argument("--duplicate-guard-mode", choices=["title", "hash", "none"], help="Duplicate guard mode")
+    parser.add_argument("--compression-keep-original", action="store_true", help="Keep original after compression")
+    parser.add_argument("--compression-replace-original", action="store_true", help="Replace original with compressed file")
     return parser.parse_args()
 
 def _validate_positive_int(value, name):
@@ -204,6 +215,14 @@ def validate_config(config):
     privacy = config.get("youtube_privacy")
     if privacy not in {"unlisted", "private", "public"}:
         logging.warning("youtube_privacy should be unlisted/private/public. Got: %s", privacy)
+
+    drive_sync_mode = config.get("drive_sync_mode")
+    if drive_sync_mode not in {"move", "copy"}:
+        logging.warning("drive_sync_mode should be move/copy. Got: %s", drive_sync_mode)
+
+    duplicate_guard_mode = config.get("duplicate_guard_mode")
+    if duplicate_guard_mode not in {"title", "hash", "none"}:
+        logging.warning("duplicate_guard_mode should be title/hash/none. Got: %s", duplicate_guard_mode)
 
     scopes = config.get("scopes")
     if scopes is not None and not isinstance(scopes, list):
@@ -253,6 +272,9 @@ def apply_config(config, args):
     global LOG_BACKUP_COUNT
     global UPLOADED_TITLES_PATH
     global DELETE_AFTER_UPLOAD
+    global DRIVE_SYNC_MODE
+    global DUPLICATE_GUARD_MODE
+    global COMPRESSION_KEEP_ORIGINAL
 
     if args.watch_folder:
         config["watch_folder"] = args.watch_folder
@@ -310,6 +332,14 @@ def apply_config(config, args):
         config["uploaded_titles_path"] = args.uploaded_titles_path
     if args.delete_after_upload:
         config["delete_after_upload"] = True
+    if args.drive_sync_mode is not None:
+        config["drive_sync_mode"] = args.drive_sync_mode
+    if args.duplicate_guard_mode is not None:
+        config["duplicate_guard_mode"] = args.duplicate_guard_mode
+    if args.compression_replace_original:
+        config["compression_keep_original"] = False
+    elif args.compression_keep_original:
+        config["compression_keep_original"] = True
 
     WATCH_FOLDER = config["watch_folder"]
     DRIVE_SYNC_FOLDER = config["drive_sync_folder"]
@@ -342,6 +372,9 @@ def apply_config(config, args):
     LOG_BACKUP_COUNT = config["log_backup_count"]
     UPLOADED_TITLES_PATH = config["uploaded_titles_path"]
     DELETE_AFTER_UPLOAD = config["delete_after_upload"]
+    DRIVE_SYNC_MODE = config["drive_sync_mode"]
+    DUPLICATE_GUARD_MODE = config["duplicate_guard_mode"]
+    COMPRESSION_KEEP_ORIGINAL = config["compression_keep_original"]
     configure_logging()
 
 def authenticate_youtube():
@@ -668,14 +701,18 @@ def upload_to_youtube(youtube_service, file_path, title, upload_options):
 
     raise RuntimeError("Upload failed without exception.")
 
-def move_to_drive(file_path, dest_folder):
-    """Move file to Google Drive sync folder."""
+def move_to_drive(file_path, dest_folder, mode="move"):
+    """Move or copy file to Google Drive sync folder."""
     if not dest_folder:
         return
     os.makedirs(dest_folder, exist_ok=True)
     new_path = os.path.join(dest_folder, os.path.basename(file_path))
-    shutil.move(file_path, new_path)
-    logging.info("Moved to Drive sync folder: %s", new_path)
+    if mode == "copy":
+        shutil.copy2(file_path, new_path)
+        logging.info("Copied to Drive sync folder: %s", new_path)
+    else:
+        shutil.move(file_path, new_path)
+        logging.info("Moved to Drive sync folder: %s", new_path)
 
 class PendingUploadQueued(Exception):
     """Raised when an upload is queued for later retry."""
@@ -715,6 +752,7 @@ def process_pending_uploads(youtube_service):
         original_path = item.get("original_path")
         cleanup_path = item.get("cleanup_path")
         drive_sync_folder = item.get("drive_sync_folder")
+        drive_sync_mode = item.get("drive_sync_mode") or DRIVE_SYNC_MODE
         if not file_path or not title or not upload_options:
             logging.warning("Skipping invalid pending upload entry: %s", item)
             continue
@@ -732,9 +770,17 @@ def process_pending_uploads(youtube_service):
                 os.remove(cleanup_path)
             if drive_sync_folder:
                 if original_path and os.path.exists(original_path):
-                    move_to_drive(original_path, drive_sync_folder)
+                    move_to_drive(original_path, drive_sync_folder, mode=drive_sync_mode)
+                    if DELETE_AFTER_UPLOAD and drive_sync_mode == "copy":
+                        if os.path.exists(original_path):
+                            os.remove(original_path)
                 elif os.path.exists(file_path) and file_path != cleanup_path:
-                    move_to_drive(file_path, drive_sync_folder)
+                    move_to_drive(file_path, drive_sync_folder, mode=drive_sync_mode)
+                    if DELETE_AFTER_UPLOAD and drive_sync_mode == "copy":
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+            elif DELETE_AFTER_UPLOAD and os.path.exists(file_path):
+                os.remove(file_path)
         except (HttpError, OSError, ValueError) as exc:
             logging.error("Pending upload failed, keeping in queue: %s", exc)
             remaining.append(item)
@@ -742,25 +788,48 @@ def process_pending_uploads(youtube_service):
     save_pending_uploads(PENDING_UPLOADS_PATH, remaining)
 
 def load_uploaded_titles(path):
+    return load_uploaded_cache(path)
+
+def save_uploaded_titles(path, cache):
+    save_uploaded_cache(path, cache)
+
+def _normalize_uploaded_cache(data):
+    if not isinstance(data, dict):
+        return {"titles": {}, "hashes": {}}
+    if "titles" in data or "hashes" in data:
+        return {
+            "titles": data.get("titles", {}),
+            "hashes": data.get("hashes", {}),
+        }
+    return {"titles": data, "hashes": {}}
+
+def load_uploaded_cache(path):
     if not os.path.exists(path):
-        return {}
+        return {"titles": {}, "hashes": {}}
     try:
         with open(path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
-        if not isinstance(data, dict):
-            logging.warning("Uploaded titles cache is invalid: %s", path)
-            return {}
-        return data
+        return _normalize_uploaded_cache(data)
     except (OSError, json.JSONDecodeError) as exc:
-        logging.warning("Failed to load uploaded titles cache: %s", exc)
-        return {}
+        logging.warning("Failed to load uploaded cache: %s", exc)
+        return {"titles": {}, "hashes": {}}
 
-def save_uploaded_titles(path, cache):
+def save_uploaded_cache(path, cache):
     try:
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(cache, handle, indent=2, sort_keys=True)
     except OSError as exc:
-        logging.warning("Failed to save uploaded titles cache: %s", exc)
+        logging.warning("Failed to save uploaded cache: %s", exc)
+
+def compute_file_hash(file_path, chunk_size=8 * 1024 * 1024):
+    hash_obj = hashlib.sha256()
+    with open(file_path, "rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            hash_obj.update(chunk)
+    return hash_obj.hexdigest()
 
 def process_existing_files(handler):
     entries = []
@@ -800,7 +869,7 @@ class VideoHandler(FileSystemEventHandler):
         self.youtube = youtube_service
         self.processing_files = set()  # Track files being processed
         self.pull_tracker = load_pull_tracker(PULL_TRACKER_PATH)
-        self.uploaded_titles = load_uploaded_titles(UPLOADED_TITLES_PATH)
+        self.uploaded_cache = load_uploaded_titles(UPLOADED_TITLES_PATH)
         self.stats = {
             "processed": 0,
             "uploaded": 0,
@@ -935,11 +1004,30 @@ class VideoHandler(FileSystemEventHandler):
             if DRY_RUN:
                 logging.info("Dry run enabled; skipping upload and Drive sync.")
             else:
-                if youtube_title in self.uploaded_titles:
-                    logging.info("Skipping duplicate title: %s", youtube_title)
-                    move_to_drive(temp_path, DRIVE_SYNC_FOLDER)
-                    self.stats["skipped_duplicate"] += 1
-                    return
+                if DUPLICATE_GUARD_MODE != "none":
+                    duplicate_key = None
+                    if DUPLICATE_GUARD_MODE == "title":
+                        duplicate_key = youtube_title
+                        if duplicate_key in self.uploaded_cache["titles"]:
+                            logging.info("Skipping duplicate title: %s", youtube_title)
+                            if DRIVE_SYNC_FOLDER:
+                                move_to_drive(temp_path, DRIVE_SYNC_FOLDER, mode=DRIVE_SYNC_MODE)
+                                if DELETE_AFTER_UPLOAD and DRIVE_SYNC_MODE == "copy":
+                                    if os.path.exists(temp_path):
+                                        os.remove(temp_path)
+                            self.stats["skipped_duplicate"] += 1
+                            return
+                    elif DUPLICATE_GUARD_MODE == "hash":
+                        duplicate_key = compute_file_hash(temp_path)
+                        if duplicate_key in self.uploaded_cache["hashes"]:
+                            logging.info("Skipping duplicate hash: %s", duplicate_key)
+                            if DRIVE_SYNC_FOLDER:
+                                move_to_drive(temp_path, DRIVE_SYNC_FOLDER, mode=DRIVE_SYNC_MODE)
+                                if DELETE_AFTER_UPLOAD and DRIVE_SYNC_MODE == "copy":
+                                    if os.path.exists(temp_path):
+                                        os.remove(temp_path)
+                            self.stats["skipped_duplicate"] += 1
+                            return
                 upload_succeeded = False
                 # Upload to YouTube
                 try:
@@ -958,11 +1046,17 @@ class VideoHandler(FileSystemEventHandler):
                     elapsed = time.time() - start_time
                     logging.info("Uploaded %s (%s) in %.1fs", youtube_title, video_url, elapsed)
                     upload_succeeded = True
-                    self.uploaded_titles[youtube_title] = {
+                    self.uploaded_cache["titles"][youtube_title] = {
                         "url": video_url,
                         "uploaded_at": datetime.datetime.now().isoformat(),
                     }
-                    save_uploaded_titles(UPLOADED_TITLES_PATH, self.uploaded_titles)
+                    if DUPLICATE_GUARD_MODE == "hash":
+                        file_hash = compute_file_hash(temp_path)
+                        self.uploaded_cache["hashes"][file_hash] = {
+                            "url": video_url,
+                            "uploaded_at": datetime.datetime.now().isoformat(),
+                        }
+                    save_uploaded_titles(UPLOADED_TITLES_PATH, self.uploaded_cache)
                     self.stats["uploaded"] += 1
                 except (HttpError, OSError) as exc:
                     logging.error("Upload failed, adding to pending queue: %s", exc)
@@ -972,6 +1066,7 @@ class VideoHandler(FileSystemEventHandler):
                         "original_path": temp_path,
                         "cleanup_path": upload_path if compressed else None,
                         "drive_sync_folder": DRIVE_SYNC_FOLDER,
+                        "drive_sync_mode": DRIVE_SYNC_MODE,
                         "title": youtube_title,
                         "upload_options": {
                             "description": DEFAULT_DESCRIPTION,
@@ -986,10 +1081,18 @@ class VideoHandler(FileSystemEventHandler):
                 finally:
                     if compressed and upload_succeeded and os.path.exists(upload_path):
                         os.remove(upload_path)
+                    if compressed and not upload_succeeded and not COMPRESSION_KEEP_ORIGINAL:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
 
                 # Copy to Drive folder (optional)
-                move_to_drive(temp_path, DRIVE_SYNC_FOLDER)
-                if DELETE_AFTER_UPLOAD and not DRIVE_SYNC_FOLDER and os.path.exists(temp_path):
+                if DRIVE_SYNC_FOLDER:
+                    move_to_drive(temp_path, DRIVE_SYNC_FOLDER, mode=DRIVE_SYNC_MODE)
+                    if DELETE_AFTER_UPLOAD and DRIVE_SYNC_MODE == "copy":
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                            logging.info("Deleted local file after upload: %s", temp_path)
+                elif DELETE_AFTER_UPLOAD and os.path.exists(temp_path):
                     os.remove(temp_path)
                     logging.info("Deleted local file after upload: %s", temp_path)
 
