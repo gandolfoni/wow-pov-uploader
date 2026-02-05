@@ -93,6 +93,12 @@ You can override config values on the CLI:
 python youtube_uploader.py --watch-folder "C:\Path\To\WarcraftRecorder" --dry-run
 ```
 
+Generate a minimal `config.json`:
+
+```bash
+python generate_config.py
+```
+
 Process existing files and exit:
 
 ```bash
@@ -173,6 +179,9 @@ python reset_pending_uploads.py
 | `drive_sync_mode` | Drive sync `move` or `copy` | `move` |
 | `duplicate_guard_mode` | Duplicate guard `title`, `hash`, `none` | `title` |
 | `compression_keep_original` | Keep original if compression used | `true` |
+| `failed_folder` | Folder for failed files | `failed` |
+| `max_uploads_per_run` | Limit uploads per run | `null` |
+| `title_collision_suffix` | Title collision `auto` or `none` | `auto` |
 
 ## File Naming
 

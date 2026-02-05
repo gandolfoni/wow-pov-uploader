@@ -65,6 +65,10 @@ python --version
      "ignore_extensions": [".tmp", ".part", ".crdownload"]
    }
    ```
+   - Or generate one:
+   ```bash
+   python generate_config.py
+   ```
 
 3. **CLI Overrides (Optional)**
    - You can override any config values at runtime:
@@ -82,6 +86,10 @@ python --version
    - Copy instead of move to Drive sync:
    ```bash
    python youtube_uploader.py --drive-sync-mode copy
+   ```
+   - Limit uploads per run:
+   ```bash
+   python youtube_uploader.py --max-uploads-per-run 3
    ```
 
 3. **Create Watch Folder**

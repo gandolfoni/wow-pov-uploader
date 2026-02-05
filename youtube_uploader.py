@@ -64,6 +64,9 @@ CONFIG_DEFAULTS = {
     "drive_sync_mode": "move",
     "duplicate_guard_mode": "title",
     "compression_keep_original": True,
+    "failed_folder": "failed",
+    "max_uploads_per_run": None,
+    "title_collision_suffix": "auto",
 }
 
 WATCH_FOLDER = CONFIG_DEFAULTS["watch_folder"]
@@ -100,6 +103,9 @@ DELETE_AFTER_UPLOAD = CONFIG_DEFAULTS["delete_after_upload"]
 DRIVE_SYNC_MODE = CONFIG_DEFAULTS["drive_sync_mode"]
 DUPLICATE_GUARD_MODE = CONFIG_DEFAULTS["duplicate_guard_mode"]
 COMPRESSION_KEEP_ORIGINAL = CONFIG_DEFAULTS["compression_keep_original"]
+FAILED_FOLDER = CONFIG_DEFAULTS["failed_folder"]
+MAX_UPLOADS_PER_RUN = CONFIG_DEFAULTS["max_uploads_per_run"]
+TITLE_COLLISION_SUFFIX = CONFIG_DEFAULTS["title_collision_suffix"]
 
 # Setup logging
 def configure_logging():
@@ -183,6 +189,9 @@ def parse_args():
     parser.add_argument("--duplicate-guard-mode", choices=["title", "hash", "none"], help="Duplicate guard mode")
     parser.add_argument("--compression-keep-original", action="store_true", help="Keep original after compression")
     parser.add_argument("--compression-replace-original", action="store_true", help="Replace original with compressed file")
+    parser.add_argument("--failed-folder", help="Folder to move failed files into")
+    parser.add_argument("--max-uploads-per-run", type=int, help="Limit uploads per run")
+    parser.add_argument("--title-collision-suffix", choices=["auto", "none"], help="Append suffix on title collisions")
     return parser.parse_args()
 
 def _validate_positive_int(value, name):
@@ -223,6 +232,10 @@ def validate_config(config):
     duplicate_guard_mode = config.get("duplicate_guard_mode")
     if duplicate_guard_mode not in {"title", "hash", "none"}:
         logging.warning("duplicate_guard_mode should be title/hash/none. Got: %s", duplicate_guard_mode)
+
+    title_collision_suffix = config.get("title_collision_suffix")
+    if title_collision_suffix not in {"auto", "none"}:
+        logging.warning("title_collision_suffix should be auto/none. Got: %s", title_collision_suffix)
 
     scopes = config.get("scopes")
     if scopes is not None and not isinstance(scopes, list):
@@ -275,6 +288,9 @@ def apply_config(config, args):
     global DRIVE_SYNC_MODE
     global DUPLICATE_GUARD_MODE
     global COMPRESSION_KEEP_ORIGINAL
+    global FAILED_FOLDER
+    global MAX_UPLOADS_PER_RUN
+    global TITLE_COLLISION_SUFFIX
 
     if args.watch_folder:
         config["watch_folder"] = args.watch_folder
@@ -340,6 +356,12 @@ def apply_config(config, args):
         config["compression_keep_original"] = False
     elif args.compression_keep_original:
         config["compression_keep_original"] = True
+    if args.failed_folder is not None:
+        config["failed_folder"] = args.failed_folder
+    if args.max_uploads_per_run is not None:
+        config["max_uploads_per_run"] = args.max_uploads_per_run
+    if args.title_collision_suffix is not None:
+        config["title_collision_suffix"] = args.title_collision_suffix
 
     WATCH_FOLDER = config["watch_folder"]
     DRIVE_SYNC_FOLDER = config["drive_sync_folder"]
@@ -375,6 +397,9 @@ def apply_config(config, args):
     DRIVE_SYNC_MODE = config["drive_sync_mode"]
     DUPLICATE_GUARD_MODE = config["duplicate_guard_mode"]
     COMPRESSION_KEEP_ORIGINAL = config["compression_keep_original"]
+    FAILED_FOLDER = config["failed_folder"]
+    MAX_UPLOADS_PER_RUN = config["max_uploads_per_run"]
+    TITLE_COLLISION_SUFFIX = config["title_collision_suffix"]
     configure_logging()
 
 def authenticate_youtube():
@@ -845,6 +870,9 @@ def process_existing_files(handler):
 
     entries.sort(key=lambda path: os.path.getmtime(path))
     for path in entries:
+        if MAX_UPLOADS_PER_RUN is not None and handler.stats["uploaded"] >= MAX_UPLOADS_PER_RUN:
+            logging.info("Reached max uploads per run (%d).", MAX_UPLOADS_PER_RUN)
+            return
         try:
             handler._process_video(path)
         except (OSError, HttpError, ValueError) as exc:
@@ -852,13 +880,15 @@ def process_existing_files(handler):
 
 def log_summary(handler):
     stats = handler.stats
+    pending_count = len(load_pending_uploads(PENDING_UPLOADS_PATH))
     logging.info(
-        "Summary | processed=%d | uploaded=%d | skipped=%d | queued=%d | failed=%d",
+        "Summary | processed=%d | uploaded=%d | skipped=%d | queued=%d | failed=%d | pending=%d",
         stats["processed"],
         stats["uploaded"],
         stats["skipped_duplicate"],
         stats["queued"],
         stats["failed"],
+        pending_count,
     )
 
 class VideoHandler(FileSystemEventHandler):
@@ -877,6 +907,7 @@ class VideoHandler(FileSystemEventHandler):
             "queued": 0,
             "failed": 0,
         }
+        self.max_uploads_per_run = MAX_UPLOADS_PER_RUN
 
     def on_created(self, event):
         """Handle file creation events."""
@@ -976,6 +1007,9 @@ class VideoHandler(FileSystemEventHandler):
 
     def _process_video(self, file_path):
         """Process a single video file with proper error handling."""
+        if self.max_uploads_per_run is not None and self.stats["uploaded"] >= self.max_uploads_per_run:
+            logging.info("Reached max uploads per run (%d). Skipping %s", self.max_uploads_per_run, file_path)
+            return
         logging.info("New file detected: %s", file_path)
         self.stats["processed"] += 1
 
@@ -1005,18 +1039,24 @@ class VideoHandler(FileSystemEventHandler):
                 logging.info("Dry run enabled; skipping upload and Drive sync.")
             else:
                 if DUPLICATE_GUARD_MODE != "none":
-                    duplicate_key = None
                     if DUPLICATE_GUARD_MODE == "title":
-                        duplicate_key = youtube_title
-                        if duplicate_key in self.uploaded_cache["titles"]:
-                            logging.info("Skipping duplicate title: %s", youtube_title)
-                            if DRIVE_SYNC_FOLDER:
-                                move_to_drive(temp_path, DRIVE_SYNC_FOLDER, mode=DRIVE_SYNC_MODE)
-                                if DELETE_AFTER_UPLOAD and DRIVE_SYNC_MODE == "copy":
-                                    if os.path.exists(temp_path):
-                                        os.remove(temp_path)
-                            self.stats["skipped_duplicate"] += 1
-                            return
+                        if youtube_title in self.uploaded_cache["titles"]:
+                            if TITLE_COLLISION_SUFFIX == "auto":
+                                suffix = 2
+                                candidate = youtube_title
+                                while candidate in self.uploaded_cache["titles"]:
+                                    candidate = f"{youtube_title} ({suffix})"
+                                    suffix += 1
+                                youtube_title = candidate
+                            else:
+                                logging.info("Skipping duplicate title: %s", youtube_title)
+                                if DRIVE_SYNC_FOLDER:
+                                    move_to_drive(temp_path, DRIVE_SYNC_FOLDER, mode=DRIVE_SYNC_MODE)
+                                    if DELETE_AFTER_UPLOAD and DRIVE_SYNC_MODE == "copy":
+                                        if os.path.exists(temp_path):
+                                            os.remove(temp_path)
+                                self.stats["skipped_duplicate"] += 1
+                                return
                     elif DUPLICATE_GUARD_MODE == "hash":
                         duplicate_key = compute_file_hash(temp_path)
                         if duplicate_key in self.uploaded_cache["hashes"]:
@@ -1111,6 +1151,14 @@ class VideoHandler(FileSystemEventHandler):
             # Restore original file if something went wrong
             if os.path.exists(backup_path):
                 shutil.move(backup_path, file_path)
+            if FAILED_FOLDER:
+                os.makedirs(FAILED_FOLDER, exist_ok=True)
+                failed_path = os.path.join(FAILED_FOLDER, os.path.basename(file_path))
+                try:
+                    shutil.move(file_path, failed_path)
+                    logging.info("Moved failed file to %s", failed_path)
+                except OSError as move_exc:
+                    logging.warning("Failed to move file to failed folder: %s", move_exc)
             raise
 
 if __name__ == "__main__":
