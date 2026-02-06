@@ -273,14 +273,22 @@ def upload_to_youtube(youtube_service, file_path, title, upload_options):
         logging.error("YouTube upload failed: %s", exc)
         raise
 
-def move_to_drive(file_path, dest_folder):
-    """Move file to Google Drive sync folder."""
+def move_to_drive(file_path, dest_folder, remove_original=False):
+    """Copy file to Google Drive sync folder, optionally removing the source."""
     if not dest_folder:
         return
     os.makedirs(dest_folder, exist_ok=True)
     new_path = os.path.join(dest_folder, os.path.basename(file_path))
-    os.rename(file_path, new_path)
+    shutil.copy2(file_path, new_path)
     logging.info("Copied to Drive sync folder: %s", new_path)
+    if remove_original:
+        try:
+            os.remove(file_path)
+            logging.info("Removed original after Drive copy: %s", file_path)
+        except OSError as exc:
+            logging.warning(
+                "Failed to remove original after Drive copy %s: %s", file_path, exc
+            )
 
 class VideoHandler(FileSystemEventHandler):
     """File system event handler for video file monitoring."""
@@ -400,7 +408,7 @@ class VideoHandler(FileSystemEventHandler):
                     },
                 )
 
-                # Copy to Drive folder (optional)
+                # Copy to Drive sync folder (optional)
                 move_to_drive(temp_path, DRIVE_SYNC_FOLDER)
 
             # Clean up backup if everything succeeded
